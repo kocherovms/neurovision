@@ -1,7 +1,7 @@
 [DEFAULT]
 kernel_size = 32
 kernel_initial_complexity = 0.3
-kernel_score_threshold = 0.5
+kernel_match_threshold = 0.5
 grid_size = 16
 grid_score_threshold = 0.1
 
