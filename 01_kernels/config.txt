@@ -3,8 +3,9 @@ kernel_size = 32
 kernel_initial_complexity = 0.3
 kernel_match_threshold = 0.5
 
-grid_size = 16
-grid_match_threshold = 0.1
+kernel_grid_size = 16
+kernel_grid_match_threshold = 0.1
+kernel_grid_evolution_days = 14
 
 dataset_source = dataset_source/101_ObjectCategories
 dataset_path = dataset
