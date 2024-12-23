@@ -11,3 +11,5 @@ dataset_source = dataset_source/101_ObjectCategories
 dataset_path = dataset
 dataset_sample_count = 3000
 
+output_path = out
+
