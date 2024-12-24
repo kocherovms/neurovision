@@ -9,7 +9,7 @@ kernel_grid_evolution_days = 1
 
 dataset_source = dataset_source/101_ObjectCategories
 dataset_path = dataset
-dataset_sample_count = 3000
+dataset_sample_count = 10000
 
 output_path = out
 
