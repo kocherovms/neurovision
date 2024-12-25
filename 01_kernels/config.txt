@@ -2,6 +2,7 @@
 kernel_size = 32
 kernel_min_complexity = 0.05
 kernel_match_threshold = 0.5
+kernel_similarity_threshold = 0.95
 
 kernel_grid_size = 16
 kernel_grid_match_threshold = 0.1
