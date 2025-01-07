@@ -1,6 +1,6 @@
 [DEFAULT]
 kernel_size = 32
-kernel_min_complexity = 0.05
+kernel_min_complexity = 0.01
 kernel_match_threshold = 0.55
 kernel_similarity_threshold = 0.95
 
