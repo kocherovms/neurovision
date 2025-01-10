@@ -8,7 +8,7 @@ kernel_grid_size = 16
 kernel_grid_match_threshold = 0.1
 kernel_grid_evolution_days = 1
 
-dataset_source = dataset_source/101_ObjectCategories
+dataset_source = dataset_source
 dataset_path = dataset
 dataset_sample_count = 10000
 
