@@ -1,4 +1,4 @@
 dataset/
-dataset_source/
+dataset_*/
 out/
 animation.gif

@@ -14,3 +14,8 @@ dataset_sample_count = 10000
 
 output_path = out
 
+[RETINA]
+kernel_size = 128
+
+dataset_path = dataset_retina
+dataset_sample_count = 5000
