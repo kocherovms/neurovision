@@ -35,7 +35,7 @@ class Config:
                 setattr(self, k, typ(section[k]))
 
 # from https://gist.github.com/parente/691d150c934b89ce744b5d54103d7f1e
-def _src_from_data(data):
+def _html_src_from_raw_image_data(data):
     """Base64 encodes image bytes for inclusion in an HTML img element"""
     img_obj = IPython.display.Image(data=data)
     for bundle in img_obj._repr_mimebundle_():
@@ -55,7 +55,7 @@ def display_images(images, captions=None, row_height='auto'):
                 image.save(b, format='PNG')
                 bts = b.getvalue()
             
-            src = _src_from_data(bts)
+            src = _html_src_from_raw_image_data(bts)
         else:
             src = image
             #caption = f'<figcaption style="font-size: 0.6em">{image}</figcaption>'
@@ -97,7 +97,7 @@ def display_images_grid(images, col_count, col_width=None, captions=None):
             image.save(b, format='PNG')
             bts = b.getvalue()
         
-        src = _src_from_data(bts)
+        src = _html_src_from_raw_image_data(bts)
 
         caption = ''
 
