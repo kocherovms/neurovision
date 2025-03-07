@@ -1,0 +1,136 @@
+import IPython
+from PIL import Image, ImageDraw
+import os, io
+import configparser
+
+class Config:
+    DEFAULTS = dict(
+        sample_size=128,
+        dataset_source='dataset_source',
+        dataset_path='dataset',
+        dataset_sample_count=1000,
+        dataset_metadata_file_name='_metadata.json',
+        output_path='out'
+    )
+    
+    def __init__(self, section_name='DEFAULT'):
+        super()
+        self.section_name = section_name
+        self.reload()
+
+    def reload(self):
+        config = configparser.ConfigParser(defaults=type(self).DEFAULTS)
+
+        if os.path.exists('config.txt'):
+            config.read('config.txt')
+
+        sections = [config['DEFAULT']]
+
+        if self.section_name != 'DEFAULT':
+            sections.append(config[self.section_name])
+
+        for section in sections:
+            for k in section:
+                typ = type(type(self).DEFAULTS[k]) # enforce proper type (e.g. kernel_size must by int, not string)
+                setattr(self, k, typ(section[k]))
+
+# from https://gist.github.com/parente/691d150c934b89ce744b5d54103d7f1e
+def _src_from_data(data):
+    """Base64 encodes image bytes for inclusion in an HTML img element"""
+    img_obj = IPython.display.Image(data=data)
+    for bundle in img_obj._repr_mimebundle_():
+        for mimetype, b64value in bundle.items():
+            if mimetype.startswith('image/'):
+                return f'data:{mimetype};base64,{b64value}'
+
+def display_images(images, captions=None, row_height='auto'):
+    figures = []
+    
+    for image_index, image in enumerate(images):
+        if isinstance(image, bytes) or isinstance(image, Image.Image):
+            if isinstance(image, bytes):
+                bts = image
+            else:
+                b = io.BytesIO()
+                image.save(b, format='PNG')
+                bts = b.getvalue()
+            
+            src = _src_from_data(bts)
+        else:
+            src = image
+            #caption = f'<figcaption style="font-size: 0.6em">{image}</figcaption>'
+
+        caption = ''
+        
+        if not captions is None:
+            if isinstance(captions, dict):
+                caption = captions.get(id(image), '')
+            else:
+                assert len(captions) == len(images)
+                caption = captions[image_index]
+
+            if caption:
+                caption = f'<figcaption style="font-size: 0.6em">{caption}</figcaption>'
+        
+        figures.append(f'''
+            <figure style="margin: 5px !important;">
+              <img src="{src}" style="height: {row_height}">
+              {caption}
+            </figure>
+        ''')
+    return IPython.display.HTML(data=f'''
+        <div style="display: flex; flex-flow: row wrap; text-align: center;">
+        {''.join(figures)}
+        </div>
+    ''')
+
+def display_images_grid(images, col_count, col_width=None, captions=None):
+    figures = []
+    
+    for image_index, image in enumerate(images):
+        assert isinstance(image, bytes) or isinstance(image, Image.Image)
+
+        if isinstance(image, bytes):
+            bts = image
+        else:
+            b = io.BytesIO()
+            image.save(b, format='PNG')
+            bts = b.getvalue()
+        
+        src = _src_from_data(bts)
+
+        caption = ''
+
+        if not captions is None:
+            if isinstance(captions, dict):
+                caption = str(captions.get(id(image), ''))
+            else:
+                assert len(captions) == len(images)
+                caption = str(captions[image_index])
+
+            if caption:
+                caption = f'<figcaption style="font-size: 0.6em">{caption}</figcaption>'
+        
+        figures.append(f'''
+            <figure style="margin: 5px !important;">
+              <img src="{src}" style="height: auto">
+              {caption}
+            </figure>
+        ''')
+
+    if not col_width:
+        if len(images) > 0 and isinstance(images[0], Image.Image):
+            col_width = images[0].width
+
+    if not col_width: 
+        col_width='auto'
+    else:
+        col_width = f'{col_width}px'
+        
+    return IPython.display.HTML(data=f'''<div style="
+        display: grid; 
+        grid-template-columns: repeat({col_count}, {col_width});
+        column-gap: 1px;
+        row-gap: 1px;">
+        {''.join(figures)}
+    </div>''')
