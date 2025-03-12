@@ -1,3 +1,7 @@
 [DEFAULT]
 sample_size = 128
 dataset_sample_count = 10000
+
+[VER_2]
+dataset_train_samples_count=10000
+dataset_test_samples_count=2000

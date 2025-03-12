@@ -8,7 +8,9 @@ class Config:
         sample_size=128,
         dataset_source='dataset_source',
         dataset_path='dataset',
-        dataset_sample_count=1000,
+        dataset_sample_count=10000,
+        dataset_train_samples_count=10000,
+        dataset_test_samples_count=2000,
         dataset_metadata_file_name='_metadata.json',
         output_path='out'
     )
