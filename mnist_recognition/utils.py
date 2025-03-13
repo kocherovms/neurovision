@@ -12,7 +12,9 @@ class Config:
         dataset_train_samples_count=10000,
         dataset_test_samples_count=2000,
         dataset_metadata_file_name='_metadata.json',
-        output_path='out'
+        output_path='out',
+        train_db_file_name='train.db',
+        test_db_file_name='test.db',
     )
     
     def __init__(self, section_name='DEFAULT'):
