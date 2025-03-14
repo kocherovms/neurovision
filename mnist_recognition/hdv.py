@@ -78,6 +78,12 @@ class Hdv(object):
         sum = self.xp.sum(hdvs, axis=0)
         return self.xp.sign(sum)
 
+    def debundle(self, hdv_bundle, hdv):
+        assert hdv_bundle.shape == (self.N,)
+        assert hdv.shape == (self.N,)
+        complement = hdv * (-1)
+        return self.bundle(hdv_bundle, complement)
+
     def bind(self, hdv1, hdv2):
         assert hdv1.shape == (self.N,)
         assert hdv2.shape == (self.N,)
@@ -91,3 +97,29 @@ class Hdv(object):
         assert hdv1.shape == (self.N,)
         assert hdv2.shape == (self.N,)
         return hdv1.astype(int) @ hdv2.astype(int) / (self.xp.linalg.norm(hdv1) *  self.xp.linalg.norm(hdv2)) # .astype(int) is a MUST, otherwise Geisenbugs with overflow occur
+
+class HdvArray(object):
+    def __init__(self, N, xp):
+        self.xp = xp
+        self.N = N
+        self.array = xp.zeros((10, N), dtype='b')
+        self.free_slots = set(range(self.array.shape[0]))
+
+    def lease(self):
+        if self.free_slots:
+            return self.free_slots.pop()
+
+        current_array_size = self.array.shape[0]
+        new_array_size = current_array_size * 2
+        new_array = self.xp.zeros((new_array_size, self.N), dtype='b')
+        new_array[:current_array_size] = self.array
+        self.array = new_array
+        self.free_slots.update(range(current_array_size, self.array.shape[0]))
+        return self.free_slots.pop()
+
+    def release(self, index):
+        assert not index in self.free_slots
+        self.free_slots.add(index)
+        self.array[index] = self.xp.zeros(self.N, dtype='b')    
+        
+        
