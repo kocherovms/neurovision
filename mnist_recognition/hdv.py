@@ -102,8 +102,11 @@ class HdvArray(object):
     def __init__(self, N, xp):
         self.xp = xp
         self.N = N
-        self.array = xp.zeros((10, N), dtype='b')
+        self.array = xp.zeros((10, N))
         self.free_slots = set(range(self.array.shape[0]))
+
+    def len(self):
+        return self.array.shape[0] - len(self.free_slots)
 
     def lease(self):
         if self.free_slots:
@@ -111,7 +114,7 @@ class HdvArray(object):
 
         current_array_size = self.array.shape[0]
         new_array_size = current_array_size * 2
-        new_array = self.xp.zeros((new_array_size, self.N), dtype='b')
+        new_array = self.xp.zeros((new_array_size, self.N))
         new_array[:current_array_size] = self.array
         self.array = new_array
         self.free_slots.update(range(current_array_size, self.array.shape[0]))
@@ -120,6 +123,6 @@ class HdvArray(object):
     def release(self, index):
         assert not index in self.free_slots
         self.free_slots.add(index)
-        self.array[index] = self.xp.zeros(self.N, dtype='b')    
+        self.array[index] = self.xp.zeros(self.N)
         
         
