@@ -1,5 +1,4 @@
-
-class Hdv(object):
+class Hdc(object):
     def __init__(self, N, xp):
         self.N = N
         self.xp = xp
@@ -24,6 +23,10 @@ class Hdv(object):
     
         l = self.xp.linalg.norm(hdv, axis=1)
         return (hdv.T / l).T
+
+    def complement(self, hdv):
+        assert hdv.shape == (self.N,)
+        return hdv * (-1)
 
     def absdist(self, hdv1, hdv2):
         assert hdv1.shape == (self.N,)
