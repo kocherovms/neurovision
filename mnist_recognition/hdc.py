@@ -2,11 +2,12 @@ class Hdc(object):
     def __init__(self, N, xp):
         self.N = N
         self.xp = xp
+        self.source = self.xp.array([-1, +1], dtype='b')
         self.bundle = self.bundle_noties
 
     def __call__(self, n=1):
         size = self.N if n==1 else (n, self.N)
-        return self.xp.random.default_rng().choice(self.xp.array([-1, +1], dtype='b'), size=size)
+        return self.xp.random.choice(self.source, size=size) # no cp.random.default_rng().choice in cupy :(
 
     def normalize(self, hdv):
         if type(hdv) is list:
@@ -53,14 +54,17 @@ class Hdc(object):
                     hdvs.extend(t)
                 case _:
                     assert False, hdv1.shape
+
+        if type(hdvs) is list:
+            hdvs = self.xp.array(hdvs)
     
         sum = self.xp.sum(hdvs, axis=0)
         
         if len(hdvs) % 2 == 0:
             tie_breaker = self()
-            sum = self.xp.sum([sum, tie_breaker], axis=0)
+            sum = self.xp.sum(self.xp.array([sum, tie_breaker]), axis=0)
             
-        return self.xp.sign(sum)
+        return self.xp.sign(sum).astype('b')
 
     def bundle_noties(self, hdv1, *hdvs):
         if type(hdv1) is list: # bundle([x1, x2])
@@ -77,9 +81,12 @@ class Hdc(object):
                     hdvs.extend(t)
                 case _:
                     assert False, hdv1.shape
-    
+
+        if type(hdvs) is list:
+            hdvs = self.xp.array(hdvs)
+            
         sum = self.xp.sum(hdvs, axis=0)
-        return self.xp.sign(sum)
+        return self.xp.sign(sum).astype('b')
 
     def debundle(self, hdv_bundle, hdv):
         assert hdv_bundle.shape == (self.N,)
@@ -90,11 +97,11 @@ class Hdc(object):
     def bind(self, hdv1, hdv2):
         assert hdv1.shape == (self.N,)
         assert hdv2.shape == (self.N,)
-        return self.xp.prod([hdv1, hdv2], axis=0)
+        return self.xp.prod(self.xp.array([hdv1, hdv2]), axis=0).astype('b')
         
     def shift(self, hdv, k=1):
         assert hdv.shape == (self.N,)
-        return self.xp.roll(hdv, k)
+        return self.xp.roll(hdv, k).astype('b')
 
     def sim(self, hdv1, hdv2):
         assert hdv1.shape == (self.N,)
@@ -127,5 +134,8 @@ class HdvArray(object):
         assert not index in self.free_slots
         self.free_slots.add(index)
         self.array[index] = self.xp.zeros(self.N)
-        
+
+    def clear(self):
+        self.free_slots = set(range(self.array.shape[0]))
+        self.array[:] = 0
         

@@ -13,8 +13,10 @@ class Config:
         dataset_test_samples_count=2000,
         dataset_metadata_file_name='_metadata.json',
         output_path='out',
+        hdv_db_file_name='hdv.db',
         train_db_file_name='train.db',
         test_db_file_name='test.db',
+        hdc_n=10000,
     )
     
     def __init__(self, section_name='DEFAULT'):
