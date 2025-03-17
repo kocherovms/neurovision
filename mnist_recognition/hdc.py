@@ -5,13 +5,18 @@ class Hdc(object):
         self.source = self.xp.array([-1, +1], dtype='b')
         self.bundle = self.bundle_noties
 
+        if self.xp.__name__ == 'cupy':
+            self.wrap_list = lambda l: self.xp.array(l)
+        else:
+            self.wrap_list = lambda l: l
+
     def __call__(self, n=1):
         size = self.N if n==1 else (n, self.N)
         return self.xp.random.choice(self.source, size=size) # no cp.random.default_rng().choice in cupy :(
 
     def normalize(self, hdv):
         if type(hdv) is list:
-            hdv = self.xp.array(hdv)
+            hdv = self.xp.array(hdv) # to wrap_list since at the end we do batch division with broadcast
         else:
             match hdv.shape:
                 case (N,):
@@ -42,7 +47,7 @@ class Hdc(object):
     def bundle_ties(self, hdv1, *hdvs):
         if type(hdv1) is list: # bundle([x1, x2])
             assert not hdvs
-            hdvs = hdv1
+            hdvs = self.wrap_list(hdv1)
         else:
             match hdv1.shape:
                 case (_, self.N): # bundle(matrix_of_hdvs)
@@ -52,24 +57,22 @@ class Hdc(object):
                     t = hdvs
                     hdvs = [hdv1]
                     hdvs.extend(t)
+                    hdvs = self.wrap_list(hdvs)
                 case _:
                     assert False, hdv1.shape
 
-        if type(hdvs) is list:
-            hdvs = self.xp.array(hdvs)
-    
         sum = self.xp.sum(hdvs, axis=0)
         
         if len(hdvs) % 2 == 0:
             tie_breaker = self()
-            sum = self.xp.sum(self.xp.array([sum, tie_breaker]), axis=0)
+            sum = self.xp.sum(self.wrap_list([sum, tie_breaker]), axis=0)
             
         return self.xp.sign(sum).astype('b')
 
     def bundle_noties(self, hdv1, *hdvs):
         if type(hdv1) is list: # bundle([x1, x2])
             assert not hdvs
-            hdvs = hdv1
+            hdvs = self.wrap_list(hdv1)
         else:
             match hdv1.shape:
                 case (_, self.N): # bundle(matrix_of_hdvs)
@@ -79,12 +82,10 @@ class Hdc(object):
                     t = hdvs
                     hdvs = [hdv1]
                     hdvs.extend(t)
+                    hdvs = self.wrap_list(hdvs)
                 case _:
                     assert False, hdv1.shape
 
-        if type(hdvs) is list:
-            hdvs = self.xp.array(hdvs)
-            
         sum = self.xp.sum(hdvs, axis=0)
         return self.xp.sign(sum).astype('b')
 
