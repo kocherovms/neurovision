@@ -22,3 +22,14 @@ dataset_test_samples_count=2000
 hdv_db_file_name=grid_hdv.db
 train_db_file_name=grid_train.db
 test_db_file_name=grid_test.db
+
+[SQLITE3_MULTI_GRID_RETINA]
+cortical_columns_count=5
+cortical_column_receptive_field_size=64
+retina_type=grid
+dataset_path = dataset_db
+dataset_train_samples_count=100
+dataset_test_samples_count=20
+hdv_db_file_name=multi_hdv.db
+train_db_file_name=multi_train.db
+test_db_file_name=multi_test.db

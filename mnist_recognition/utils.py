@@ -1,11 +1,16 @@
-import IPython
-from PIL import Image, ImageDraw
 import os, io
 import configparser
+import numpy as np
+import IPython
+from PIL import Image, ImageDraw
 
 class Config:
     DEFAULTS = dict(
+        hdc_n=10000,
         sample_size=128,
+        cortical_columns_count=1,
+        cortical_column_receptive_field_size=128,
+        retina_type='grid',
         dataset_source='dataset_source',
         dataset_path='dataset',
         dataset_sample_count=10000,
@@ -16,7 +21,6 @@ class Config:
         hdv_db_file_name='hdv.db',
         train_db_file_name='train.db',
         test_db_file_name='test.db',
-        hdc_n=10000,
     )
     
     def __init__(self, section_name='DEFAULT'):
@@ -140,3 +144,18 @@ def display_images_grid(images, col_count, col_width=None, captions=None):
         row-gap: 1px;">
         {''.join(figures)}
     </div>''')
+
+def matrix_to_image(m):
+    m = m.ravel()
+    sz = int(np.sqrt(m.shape[0]))
+    assert sz * sz == m.shape[0]
+    return Image.frombytes('L', size=(sz, sz), data=m.astype('b'))
+
+def lay_grid(image, step=16):
+    draw = ImageDraw.Draw(image)
+
+    for c in range(step - 1, image.height, step):
+        draw.line([0, c, image.width, c], fill=127)
+        draw.line([c, 0, c, image.height], fill=127)
+
+    return image
