@@ -1,3 +1,5 @@
+from heapq import heapify, heappush, heappop
+
 class Hdc(object):
     def __init__(self, N, xp):
         self.N = N
@@ -110,33 +112,57 @@ class Hdc(object):
         return hdv1.astype(int) @ hdv2.astype(int) / (self.xp.linalg.norm(hdv1) *  self.xp.linalg.norm(hdv2)) # .astype(int) is a MUST, otherwise Geisenbugs with overflow occur
 
 class HdvArray(object):
-    def __init__(self, N, xp):
+    def __init__(self, N, xp, initial_length=10):
         self.xp = xp
         self.N = N
-        self.array = xp.zeros((10, N))
-        self.free_slots = set(range(self.array.shape[0]))
+        self.array = xp.zeros((initial_length, N))
+        self.free_indices = list(range(self.array.shape[0]))
+        heapify(self.free_indices)
+        self.leased_indices = set()
+        self.active_len = 0
 
+    @property
     def len(self):
-        return self.array.shape[0] - len(self.free_slots)
+        return len(leased_indices)
 
     def lease(self):
-        if self.free_slots:
-            return self.free_slots.pop()
+        if self.free_indices:
+            index = heappop(self.free_indices) # lowest possible index is returned, so the array space is reused effectively
+            assert not index in self.leased_indices 
+            self.leased_indices.add(index)
+            self.active_len = max(self.leased_indices) + 1 if self.leased_indices else 0
+            return index
 
         current_array_size = self.array.shape[0]
         new_array_size = current_array_size * 2
         new_array = self.xp.zeros((new_array_size, self.N))
         new_array[:current_array_size] = self.array
         self.array = new_array
-        self.free_slots.update(range(current_array_size, self.array.shape[0]))
-        return self.free_slots.pop()
+
+        for free_index in range(current_array_size, self.array.shape[0]):
+            heappush(self.free_indices, free_index)
+
+        index = heappop(self.free_indices) # lowest possible index is returned, so the array space is reused effectively
+        assert not index in self.leased_indices 
+        self.leased_indices.add(index)
+        self.active_len = max(self.leased_indices) + 1 if self.leased_indices else 0
+        return index
 
     def release(self, index):
-        assert not index in self.free_slots
-        self.free_slots.add(index)
-        self.array[index] = self.xp.zeros(self.N)
+        assert index in self.leased_indices
+        heappush(self.free_indices, index)
+        self.leased_indices.discard(index)
+        self.array[index] = 0
+        self.active_len = max(self.leased_indices) + 1 if self.leased_indices else 0
 
     def clear(self):
-        self.free_slots = set(range(self.array.shape[0]))
+        self.free_indices = list(range(self.array.shape[0]))
+        heapify(self.free_indices)
+        self.leased_indices = set()
+        self.active_len = 0
         self.array[:] = 0
+
+    @property
+    def array_active(self):
+        return self.array[:self.active_len]
         
