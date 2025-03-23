@@ -119,18 +119,22 @@ class HdvArray(object):
         self.free_indices = list(range(self.array.shape[0]))
         heapify(self.free_indices)
         self.leased_indices = set()
-        self.active_len = 0
+        self.max_leased_index = -1
 
     @property
     def len(self):
-        return len(leased_indices)
+        return len(self.leased_indices)
+
+    @property 
+    def active_len(self):
+        return self.max_leased_index + 1
 
     def lease(self):
         if self.free_indices:
             index = heappop(self.free_indices) # lowest possible index is returned, so the array space is reused effectively
             assert not index in self.leased_indices 
             self.leased_indices.add(index)
-            self.active_len = max(self.leased_indices) + 1 if self.leased_indices else 0
+            self.max_leased_index = max(self.max_leased_index, index)
             return index
 
         current_array_size = self.array.shape[0]
@@ -145,21 +149,25 @@ class HdvArray(object):
         index = heappop(self.free_indices) # lowest possible index is returned, so the array space is reused effectively
         assert not index in self.leased_indices 
         self.leased_indices.add(index)
-        self.active_len = max(self.leased_indices) + 1 if self.leased_indices else 0
+        self.max_leased_index = max(self.max_leased_index, index)
         return index
 
     def release(self, index):
         assert index in self.leased_indices
         heappush(self.free_indices, index)
         self.leased_indices.discard(index)
+        
+        if index == self.max_leased_index:
+            # max on set of say 50k takes xxx microseconds. So rescan only when max_leased_index was popped!
+            self.max_leased_index = max(self.leased_indices) if self.leased_indices else -1
+            
         self.array[index] = 0
-        self.active_len = max(self.leased_indices) + 1 if self.leased_indices else 0
 
     def clear(self):
         self.free_indices = list(range(self.array.shape[0]))
         heapify(self.free_indices)
         self.leased_indices = set()
-        self.active_len = 0
+        self.max_leased_index = -1
         self.array[:] = 0
 
     @property
