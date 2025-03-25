@@ -7,7 +7,7 @@ dataset_path = dataset_db
 dataset_train_samples_count=10000
 dataset_test_samples_count=2000
 
-[SQLITE3_CIRCULAR_CIRCLES_RETINA]
+[SQLITE3_CONCENTRIC_CIRCLES_RETINA]
 dataset_path = dataset_db
 dataset_train_samples_count=10000
 dataset_test_samples_count=2000
@@ -33,3 +33,26 @@ dataset_test_samples_count=2000
 hdv_db_file_name=multi_hdv.db
 train_db_file_name=multi_train.db
 test_db_file_name=multi_test.db
+
+[SQLITE3_10_GRID_RETINA]
+cortical_columns_count=10
+cortical_column_receptive_field_size=64
+retina_type=grid
+dataset_path = dataset_db
+dataset_train_samples_count=2000
+dataset_test_samples_count=500
+hdv_db_file_name=10_hdv.db
+train_db_file_name=10_train.db
+test_db_file_name=10_test.db
+
+[SQLITE3_10.128.400_CC_RETINA]
+cortical_columns_count=10
+cortical_column_receptive_field_size=128
+sensor_groups_count=400
+retina_type=concentric_circles
+dataset_path = dataset_db
+dataset_train_samples_count=2000
+dataset_test_samples_count=500
+hdv_db_file_name=x10.128.400_hdv.db
+train_db_file_name=x10.128.400_train.db
+test_db_file_name=x10.128.400_test.db

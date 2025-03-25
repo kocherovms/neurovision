@@ -10,6 +10,7 @@ class Config:
         sample_size=128,
         cortical_columns_count=1,
         cortical_column_receptive_field_size=128,
+        sensor_groups_count=256,
         retina_type='grid',
         dataset_source='dataset_source',
         dataset_path='dataset',
