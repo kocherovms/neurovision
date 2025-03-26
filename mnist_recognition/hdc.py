@@ -16,6 +16,10 @@ class Hdc(object):
         size = self.N if n==1 else (n, self.N)
         return self.xp.random.choice(self.source, size=size) # no cp.random.default_rng().choice in cupy :(
 
+    def zero(self, n=1):
+        size = self.N if n==1 else (n, self.N)
+        return self.xp.zeros(size, dtype='b') 
+
     def normalize(self, hdv):
         if type(hdv) is list:
             hdv = self.xp.array(hdv) # to wrap_list since at the end we do batch division with broadcast
@@ -109,7 +113,7 @@ class Hdc(object):
     def sim(self, hdv1, hdv2):
         assert hdv1.shape == (self.N,)
         assert hdv2.shape == (self.N,)
-        return hdv1.astype(int) @ hdv2.astype(int) / (self.xp.linalg.norm(hdv1) *  self.xp.linalg.norm(hdv2)) # .astype(int) is a MUST, otherwise Geisenbugs with overflow occur
+        return hdv1.astype(int) @ hdv2.astype(int) / (self.xp.linalg.norm(hdv1) *  self.xp.linalg.norm(hdv2)) # .astype(int) is a MUST, otherwise Geisenbugs with overflow may occur
 
 class HdvArray(object):
     def __init__(self, N, xp, initial_length=10):
