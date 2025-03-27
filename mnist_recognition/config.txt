@@ -1,14 +1,14 @@
 [DEFAULT]
-sample_size = 128
-dataset_sample_count = 10000
+sample_size=128
+dataset_sample_count=10000
 
 [SQLITE3]
-dataset_path = dataset_db
+dataset_path=dataset_db
 dataset_train_samples_count=10000
 dataset_test_samples_count=2000
 
 [SQLITE3_CONCENTRIC_CIRCLES_RETINA]
-dataset_path = dataset_db
+dataset_path=dataset_db
 dataset_train_samples_count=10000
 dataset_test_samples_count=2000
 hdv_db_file_name=cc_hdv.db
@@ -16,7 +16,7 @@ train_db_file_name=cc_train.db
 test_db_file_name=cc_test.db
 
 [SQLITE3_GRID_RETINA]
-dataset_path = dataset_db
+dataset_path=dataset_db
 dataset_train_samples_count=10000
 dataset_test_samples_count=2000
 hdv_db_file_name=grid_hdv.db
@@ -26,8 +26,8 @@ test_db_file_name=grid_test.db
 [SQLITE3_MULTI_GRID_RETINA]
 cortical_columns_count=5
 cortical_column_receptive_field_size=64
-retina_type=grid
-dataset_path = dataset_db
+retina_layout=grid
+dataset_path=dataset_db
 dataset_train_samples_count=10000
 dataset_test_samples_count=2000
 hdv_db_file_name=multi_hdv.db
@@ -37,8 +37,8 @@ test_db_file_name=multi_test.db
 [SQLITE3_10_GRID_RETINA]
 cortical_columns_count=10
 cortical_column_receptive_field_size=64
-retina_type=grid
-dataset_path = dataset_db
+retina_layout=grid
+dataset_path=dataset_db
 dataset_train_samples_count=2000
 dataset_test_samples_count=500
 hdv_db_file_name=10_hdv.db
@@ -49,8 +49,8 @@ test_db_file_name=10_test.db
 cortical_columns_count=10
 cortical_column_receptive_field_size=128
 sensor_groups_count=400
-retina_type=concentric_circles
-dataset_path = dataset_db
+retina_layout=concentric_circles
+dataset_path=dataset_db
 dataset_train_samples_count=2000
 dataset_test_samples_count=500
 hdv_db_file_name=10.128.400_cc_hdv.db
@@ -61,8 +61,8 @@ test_db_file_name=10.128.400_cc_test.db
 cortical_columns_count=30
 cortical_column_receptive_field_size=32
 sensor_groups_count=256
-retina_type=concentric_circles
-dataset_path = dataset_db
+retina_layout=concentric_circles
+dataset_path=dataset_db
 dataset_train_samples_count=2000
 dataset_test_samples_count=500
 hdv_db_file_name=30.32.256_cc_hdv.db
@@ -73,8 +73,8 @@ test_db_file_name=30.32.256_cc_test.db
 cortical_columns_count=1
 cortical_column_receptive_field_size=400
 sensor_groups_count=400
-retina_type=grid
-dataset_path = dataset_db
+retina_layout=grid
+dataset_path=dataset_db
 dataset_train_samples_count=500
 dataset_test_samples_count=100
 hdv_db_file_name=1.400.400_grid_hdv.db
@@ -85,8 +85,8 @@ test_db_file_name=1.400.400_grid_test.db
 cortical_columns_count=1
 cortical_column_receptive_field_size=400
 sensor_groups_count=400
-retina_type=grid
-dataset_path = dataset_db
+retina_layout=grid
+dataset_path=dataset_db
 dataset_train_samples_count=500
 dataset_test_samples_count=100
 hdv_db_file_name=1.400.400_grid_stride_hdvs_similar_hdv.db
@@ -97,10 +97,19 @@ test_db_file_name=1.400.400_grid_stride_hdvs_similar_test.db
 cortical_columns_count=1
 cortical_column_receptive_field_size=256
 sensor_groups_count=256
-retina_type=grid
-dataset_path = dataset_db
+retina_layout=grid
+dataset_path=dataset_db
 dataset_train_samples_count=500
 dataset_test_samples_count=100
 hdv_db_file_name=1.256.256_grid_stride_hdvs_similar_hdv.db
 train_db_file_name=1.256.256_grid_stride_hdvs_similar_train.db
 test_db_file_name=1.256.256_grid_stride_hdvs_similar_test.db
+
+[SQLITE3_ONOFF_GRID_0_256]
+sensor_type=onoff
+cortical_columns_count=0
+retina_layout=grid
+dataset_path=dataset_db
+dataset_train_samples_count=10000
+dataset_test_samples_count=2000
+db_file_name_prefix=onoff_grid_0_256_
