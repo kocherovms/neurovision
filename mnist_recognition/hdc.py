@@ -12,8 +12,8 @@ class Hdc(object):
         else:
             self.wrap_list = lambda l: l
 
-    def __call__(self, n=1):
-        size = self.N if n==1 else (n, self.N)
+    def __call__(self, n=None):
+        size = self.N if n is None else (n, self.N)
         return self.xp.random.choice(self.source, size=size) # no cp.random.default_rng().choice in cupy :(
 
     def zero(self, n=1):
@@ -22,7 +22,7 @@ class Hdc(object):
 
     def normalize(self, hdv):
         if type(hdv) is list:
-            hdv = self.xp.array(hdv) # to wrap_list since at the end we do batch division with broadcast
+            hdv = self.xp.array(hdv) # no wrap_list since at the end we do batch division with broadcast
         else:
             match hdv.shape:
                 case (N,):
@@ -52,11 +52,12 @@ class Hdc(object):
 
     def bundle_ties(self, hdv1, *hdvs):
         if type(hdv1) is list: # bundle([x1, x2])
-            assert not hdvs
+            assert not hdvs # hdvs must be empty (not None!)
             hdvs = self.wrap_list(hdv1)
         else:
             match hdv1.shape:
                 case (_, self.N): # bundle(matrix_of_hdvs)
+                    assert not hdvs, f'First argument is already a matrix of HDVs, there must be no second argument (got {type(hdvs)})'
                     hdvs = hdv1
                 case (self.N,): # bundle(x1, x2, x3)
                     assert len(hdvs) > 0
@@ -77,11 +78,12 @@ class Hdc(object):
 
     def bundle_noties(self, hdv1, *hdvs):
         if type(hdv1) is list: # bundle([x1, x2])
-            assert not hdvs
+            assert not hdvs # hdvs must be empty (not None!)
             hdvs = self.wrap_list(hdv1)
         else:
             match hdv1.shape:
                 case (_, self.N): # bundle(matrix_of_hdvs)
+                    assert not hdvs, f'First argument is already a matrix of HDVs, there must be no second argument (got {type(hdvs)})'
                     hdvs = hdv1
                 case (self.N,): # bundle(x1, x2, x3)
                     assert len(hdvs) > 0
