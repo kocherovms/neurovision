@@ -1,6 +1,8 @@
 from heapq import heapify, heappush, heappop
 
 class Hdc(object):
+    COS_SIM_THRESHOLD = 0.055
+    
     def __init__(self, N, xp):
         self.N = N
         self.xp = xp
