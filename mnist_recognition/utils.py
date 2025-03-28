@@ -9,7 +9,8 @@ class Config:
         hdc_n=10000,
         sample_size=128,
         cortical_columns_count=1,
-        cortical_column_receptive_field_size=128,
+        cortical_column_receptive_field_size=128, # for 'random' this is the number of sensor groups, for 'radial' - radius
+        cortical_columns_layout='random',
         sensor_type='normal',
         sensor_groups_count=256,
         retina_layout='grid',
