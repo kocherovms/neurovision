@@ -3,6 +3,8 @@ import configparser
 import numpy as np
 import IPython
 from PIL import Image, ImageDraw
+import logging
+import logging.handlers
 
 class Config:
     DEFAULTS = dict(
@@ -47,6 +49,44 @@ class Config:
             for k in section:
                 typ = type(type(self).DEFAULTS[k]) # enforce proper type (e.g. kernel_size must by int, not string)
                 setattr(self, k, typ(section[k]))
+
+class Logging(object):
+    def __init__(self):
+        self.logger = logging.getLogger('kmslog')
+        self.logger.setLevel(logging.DEBUG)
+        
+        if not self.logger.hasHandlers():
+            self.logger.addHandler(logging.handlers.SysLogHandler(address = '/dev/log', facility=logging.handlers.SysLogHandler.LOG_LOCAL0))
+
+        self.prefix_stanzas = dict()
+        self.prefix_stanzas_order = []
+        self.prefix = ''
+        
+    def __call__(self, s):
+        self.logger.debug(f'{self.prefix} {s}')
+
+    def push_prefix(self, stanza_name, stanza_value):
+        if stanza_name in self.prefix_stanzas:
+            self.prefix_stanzas[stanza_name] = stanza_value
+        else:
+            self.prefix_stanzas[stanza_name] = stanza_value
+            self.prefix_stanzas_order.append(stanza_name)
+
+        self.update_prefix()
+
+    def pop_prefix(self, stanza_name):
+        if stanza_name in self.prefix_stanzas:
+            del self.prefix_stanzas[stanza_name]
+
+        try:
+            self.prefix_stanzas_order.remove(stanza_name)
+        except ValueError:
+            pass
+
+        self.update_prefix()
+
+    def update_prefix(self):
+        self.prefix = '[' + ','.join(map(lambda s: f'{s}={self.prefix_stanzas[s]}', self.prefix_stanzas_order)) + ']'    
 
 # from https://gist.github.com/parente/691d150c934b89ce744b5d54103d7f1e
 def _html_src_from_raw_image_data(data):
