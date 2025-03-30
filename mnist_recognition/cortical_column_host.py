@@ -1,6 +1,8 @@
 # Cortical columns hosted within separate process
 import os, math
 from collections import defaultdict, namedtuple
+from dataclasses import dataclass
+import typing
 import itertools
 import sqlite3
 import datetime
@@ -15,7 +17,6 @@ from utils import *
 from hdc import *
 
 ###
-
 class Engram(object):
     def __init__(self):
         self.hdv_bundle_uncapped_ = None
@@ -43,6 +44,17 @@ class CorticalColumn(object):
         self.images_seen = 0
 
 ###
+
+@dataclass
+class Task:
+    task_id: int
+    op: str
+    params: dict = None
+
+@dataclass
+class TaskResult:
+    task_id: int
+    payload: typing.Any = None
 
 LOG = Logging()
 HOST_ID = None
@@ -95,51 +107,56 @@ def live(config_var, host_id, column_ids, inp_queue, out_queue):
     LOG(f'Columns [{', '.join(map(str, column_ids))}] created')
     LOG(f'Host is ready')
     
-    task_wait_timeout = 10
+    task_wait_timeout = 60
 
     while True:
         try:
+            # task is expected to be an instanace of Task class
             task = inp_queue.get(block=True, timeout=task_wait_timeout)
         except queue.Empty:
             LOG(f'Didn\'t get any tasks within {task_wait_timeout} seconds, waiting again')
             continue
 
-        LOG(f'Got task {task['OP']}')
-
-        # task is expected to be a dict with a mandatory OP key
-        match task['OP']:
+        LOG.push_prefix('TASK_ID', task.task_id)
+        LOG(f'Got task #{task.task_id} {task.op}')
+        task_result = TaskResult(task_id=task.task_id)
+        
+        match task.op:
             case 'HEALTHCHECK':
-                out_queue.put({})
+                pass
             case 'TRAIN':
-                train(task)
-                out_queue.put({})
+                train(task.params['train_run_id'], 
+                      task.params['image_ids'], 
+                      task.params['consolidation_threshold'], 
+                      task.params['attempts_to_get_no_mistakes'])
             case 'INFER':
-                result = infer(task)
-                out_queue.put({'column_votes_vector': result})
+                column_votes_vector, column_images_seen = infer(task.params['dataset_name'], task.params['image_id'])
+                task_result.payload = {'column_votes_vector': column_votes_vector, 'column_images_seen': column_images_seen}
             case 'DUMP':
                 pass
             case 'TERMINATE': 
-                out_queue.put({})
                 break
             case _:
-                LOG(f'Unknown task op: {task['OP']}, ignoring')
+                LOG(f'Unknown task op: {task.op}, ignoring')
+
+        out_queue.put(task_result)
+        LOG('Task complete')
+        LOG.pop_prefix('TASK_ID')
 
     LOG(f'Host is going down')
 
-def train(task):
-    train_step_image_ids = task['image_ids']
-    consolidation_threshold = task['consolidation_threshold']
-    attempts_to_get_no_mistakes = task['attempts_to_get_no_mistakes']
-    LOG.push_prefix('TRRID', task['train_run_id'])
-    LOG(f'Train params: len(image_ids) = {len(train_step_image_ids)}, consolidation_threshold={consolidation_threshold}, attempts_to_get_no_mistakes={attempts_to_get_no_mistakes}')
+def train(train_run_id, image_ids, consolidation_threshold, attempts_to_get_no_mistakes):
+    LOG.push_prefix('TRRID', train_run_id)
+    LOG(f'''Train params: len(image_ids) = {len(image_ids)}, 
+    consolidation_threshold={consolidation_threshold}, attempts_to_get_no_mistakes={attempts_to_get_no_mistakes}''')
     
     for column_id, column in COLUMNS.items():
         LOG.push_prefix('COL', column_id)
-        column_image_ids = train_step_image_ids.copy()
+        column_image_ids = image_ids.copy()
         
         for attempt_to_get_no_mistakes in range(attempts_to_get_no_mistakes):
             # 1) EVOLVE MEMORIES
-            for image_no, image_id in enumerate(train_step_image_ids):
+            for image_no, image_id in enumerate(column_image_ids):
                 # 1.1) MINE ENGRAMS
                 LOG.push_prefix('IMGNO', image_no)
                 LOG.push_prefix('IMGID', image_id)
@@ -257,7 +274,7 @@ def train(task):
             # 2) DETECT MISTAKES FOR CONSEQUENT FIX
             mistake_image_ids = []
             
-            for image_no, image_id in enumerate(train_step_image_ids):
+            for image_no, image_id in enumerate(column_image_ids):
                 image_value = df_train_images.loc[image_id]['value']
                 df_image_encodings = pd.read_sql('SELECT hdv FROM image_encodings WHERE image_id=:image_id AND column_id=:column_id', 
                                                  params={'image_id': int(image_id), 'column_id': column_id}, con=train_db_con)
@@ -284,22 +301,21 @@ def train(task):
                             mistake_image_ids.append(image_id)
 
             LOG(f'Mistaken image ids = {len(mistake_image_ids)}')
-            train_step_image_ids = mistake_image_ids
+            column_image_ids = mistake_image_ids
             
     LOG.pop_prefix('TRRID')
 
-def infer(task):
+def infer(dataset_name, image_id):
     datasets = {'train': (df_train_images, train_db_con), 'test': (df_test_images, test_db_con)}
-    dataset = datasets[task['dataset']]
-    image_id = task['image_id']
+    dataset = datasets[dataset_name]
     column_votes_vector = np.zeros(10)
+    column_images_seen = {}
     
     for column_id, column in COLUMNS.items():
         max_cos_sim_index = -1 # aka engram id
         max_similar_engram_image_value = ''
         max_cos_sim = 0
     
-        image_value = dataset[0].loc[image_id]['value']
         df_image_encodings = pd.read_sql('SELECT hdv FROM image_encodings WHERE image_id=:image_id AND column_id=:column_id', 
                                          params={'image_id': int(image_id), 'column_id': column_id}, con=dataset[1])
         assert len(df_image_encodings) > 0
@@ -324,4 +340,6 @@ def infer(task):
                 max_cos_sim = cos_sim_value
                 column_votes_vector[int(max_similar_engram_image_value)] += max_cos_sim
 
-    return column_votes_vector
+        column_images_seen[column_id] = column.images_seen
+
+    return column_votes_vector, column_images_seen
