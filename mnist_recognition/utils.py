@@ -159,7 +159,7 @@ def display_images_grid(images, col_count, col_width=None, captions=None):
             if isinstance(captions, dict):
                 caption = str(captions.get(id(image), ''))
             else:
-                assert len(captions) == len(images)
+                assert len(captions) == len(images), (len(captions), len(images))
                 caption = str(captions[image_index])
 
             if caption:
