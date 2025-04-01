@@ -108,8 +108,9 @@ def live(config_var, host_id, column_ids, inp_queue, out_queue):
     LOG(f'Host is ready')
     
     task_wait_timeout = 60
+    is_running = True
 
-    while True:
+    while is_running:
         try:
             # task is expected to be an instanace of Task class
             task = inp_queue.get(block=True, timeout=task_wait_timeout)
@@ -134,8 +135,8 @@ def live(config_var, host_id, column_ids, inp_queue, out_queue):
                 task_result.payload = {'column_votes_vector': column_votes_vector, 'column_images_seen': column_images_seen}
             case 'DUMP':
                 pass
-            case 'TERMINATE': 
-                break
+            case 'TERMINATE':
+                is_running = False
             case _:
                 LOG(f'Unknown task op: {task.op}, ignoring')
 
@@ -274,7 +275,8 @@ def train(train_run_id, image_ids, consolidation_threshold, attempts_to_get_no_m
             # 2) DETECT MISTAKES FOR CONSEQUENT FIX
             mistake_image_ids = []
             
-            for image_no, image_id in enumerate(column_image_ids):
+            # for image_no, image_id in enumerate(column_image_ids):
+            for image_no, image_id in enumerate(image_ids):
                 image_value = df_train_images.loc[image_id]['value']
                 df_image_encodings = pd.read_sql('SELECT hdv FROM image_encodings WHERE image_id=:image_id AND column_id=:column_id', 
                                                  params={'image_id': int(image_id), 'column_id': column_id}, con=train_db_con)
@@ -289,6 +291,7 @@ def train(train_run_id, image_ids, consolidation_threshold, attempts_to_get_no_m
                 
                 assert cos_sim_vector.shape == (column.engram_norms.array_active.shape[0],)
                 engram_ids_by_match_score = np.argsort(-cos_sim_vector) # sorted desc
+                is_mistake = True
             
                 if engram_ids_by_match_score.shape[0] > 0:
                     engram_id = engram_ids_by_match_score[0]
@@ -296,12 +299,17 @@ def train(train_run_id, image_ids, consolidation_threshold, attempts_to_get_no_m
             
                     if cos_sim_value > 0:
                         engram_image_value = column.engrams[engram_id].image_value
-    
-                        if engram_image_value != image_value:
-                            mistake_image_ids.append(image_id)
+                        is_mistake = engram_image_value != image_value
+
+                if is_mistake:
+                    # no infer or incorrect infer
+                    mistake_image_ids.append(image_id)
 
             LOG(f'Mistaken image ids = {len(mistake_image_ids)}')
             column_image_ids = mistake_image_ids
+
+        if column_image_ids:
+            LOG(f'{len(column_image_ids)} image ids remained after run')
             
     LOG.pop_prefix('TRRID')
 
