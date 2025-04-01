@@ -2,6 +2,7 @@ from heapq import heapify, heappush, heappop
 
 class Hdc(object):
     COS_SIM_THRESHOLD = 0.055
+    HDIST_THRESHOLD = 4700
     
     def __init__(self, N, xp):
         self.N = N
@@ -42,16 +43,13 @@ class Hdc(object):
         assert hdv.shape == (self.N,)
         return hdv * (-1)
 
-    def absdist(self, hdv1, hdv2):
+    # Hamming distance
+    def hdist(self, hdv1, hdv2):
         assert hdv1.shape == (self.N,)
         assert hdv2.shape == (self.N,)
         return self.xp.count_nonzero(hdv1 != hdv2)
 
-    def reldist(self, hdv1, hdv2):
-        assert hdv1.shape == (self.N,)
-        assert hdv2.shape == (self.N,)
-        return self.xp.count_nonzero(hdv1 != hdv2) / self.N
-
+    # Suitable with hdist, sim will produce lower numbers due to random -1/+1 deployed
     def bundle_ties(self, hdv1, *hdvs):
         if type(hdv1) is list: # bundle([x1, x2])
             assert not hdvs # hdvs must be empty (not None!)
@@ -78,6 +76,7 @@ class Hdc(object):
             
         return self.xp.sign(sum).astype('b')
 
+    # Suitable with sim. hdist will flicker due to even / odd number of hdvs in summation
     def bundle_noties(self, hdv1, *hdvs):
         if type(hdv1) is list: # bundle([x1, x2])
             assert not hdvs # hdvs must be empty (not None!)
@@ -114,6 +113,7 @@ class Hdc(object):
         assert hdv.shape == (self.N,)
         return self.xp.roll(hdv, k).astype('b')
 
+    # Cosine similarity
     def sim(self, hdv1, hdv2):
         assert hdv1.shape == (self.N,)
         assert hdv2.shape == (self.N,)
