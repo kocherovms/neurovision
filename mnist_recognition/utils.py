@@ -199,7 +199,7 @@ def lay_grid(image, step=16):
     draw = ImageDraw.Draw(image)
 
     for c in range(step - 1, image.height, step):
-        draw.line([0, c, image.width, c], fill=127)
-        draw.line([c, 0, c, image.height], fill=127)
+        draw.line([0, c, image.width, c], fill='gray')
+        draw.line([c, 0, c, image.height], fill='gray')
 
     return image
