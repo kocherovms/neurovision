@@ -13,7 +13,7 @@ class Config:
         cortical_columns_count=1,
         cortical_column_receptive_field_size=128, # for 'random' this is the number of sensor groups, for 'radial' - radius
         cortical_columns_layout='random',
-        sensor_type='normal',
+        encoding_type='normal',
         sensor_groups_count=256,
         retina_layout='grid',
         dataset_source='dataset_source',
