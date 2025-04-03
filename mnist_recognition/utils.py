@@ -56,7 +56,9 @@ class Logging(object):
         self.logger.setLevel(logging.DEBUG)
         
         if not self.logger.hasHandlers():
-            self.logger.addHandler(logging.handlers.SysLogHandler(address = '/dev/log', facility=logging.handlers.SysLogHandler.LOG_LOCAL0))
+            syslogHandler = logging.handlers.SysLogHandler(address='/dev/log', facility=logging.handlers.SysLogHandler.LOG_LOCAL0)
+            syslogHandler.ident = 'kmstag:'
+            self.logger.addHandler(syslogHandler)
 
         self.prefix_stanzas = dict()
         self.prefix_stanzas_order = []
