@@ -161,7 +161,7 @@ db_file_name_prefix=exnormal_grid_radial_11_256_
 
 [SQLITE3_VECTOR_GRID_0_1024]
 encoding_type=vector
-sensor_groups_count=1024
+sensors_count=1024
 cortical_columns_count=0
 retina_layout=grid
 dataset_path=dataset_db

@@ -15,6 +15,7 @@ class Config:
         cortical_columns_layout='random',
         encoding_type='normal',
         sensor_groups_count=256,
+        sensors_count=256,
         retina_layout='grid',
         dataset_source='dataset_source',
         dataset_path='dataset',
