@@ -64,9 +64,11 @@ class Logging(object):
         self.prefix_stanzas = dict()
         self.prefix_stanzas_order = []
         self.prefix = ''
+        self.is_enabled = True
         
     def __call__(self, s):
-        self.logger.debug(self.prefix + ' ' + s)
+        if self.is_enabled:
+            self.logger.debug(self.prefix + ' ' + s)
 
     def push_prefix(self, stanza_name, stanza_value):
         if stanza_name in self.prefix_stanzas:
