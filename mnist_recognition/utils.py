@@ -66,7 +66,7 @@ class Logging(object):
         self.prefix = ''
         
     def __call__(self, s):
-        self.logger.debug(f'{self.prefix} {s}')
+        self.logger.debug(self.prefix + ' ' + s)
 
     def push_prefix(self, stanza_name, stanza_value):
         if stanza_name in self.prefix_stanzas:
