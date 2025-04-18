@@ -208,3 +208,28 @@ def lay_grid(image, step=16):
         draw.line([c, 0, c, image.height], fill='gray')
 
     return image
+
+def softmax(x):
+    max_x = np.max(x)
+    exp_x = np.exp(x - max_x)
+    sum_exp_x = np.sum(exp_x)
+    return exp_x / sum_exp_x
+
+def conflate(pdfs):    
+    n = np.prod(pdfs, axis=0)
+    d = n.sum()
+
+    if np.isclose(d, 0):
+        return np.zeros(len(pdfs))
+        
+    return n / d
+
+def moving_average(a, n=3):
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    ret[:n-1] = np.array(a[:n-1]) * n
+    return ret / n
+
+def get_angle_diff(a_from, a_to):
+    andiff = a_to - a_from
+    return (andiff + 180) % 360 - 180
