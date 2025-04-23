@@ -147,6 +147,7 @@ class HdvArray(object):
 
         current_array_size = self.array.shape[0]
         new_array_size = current_array_size * 2
+        # TODO: swtich to xp.resize
         new_array = self.xp.zeros((new_array_size, self.N))
         new_array[:current_array_size] = self.array
         self.array = new_array
