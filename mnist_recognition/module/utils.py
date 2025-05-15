@@ -28,6 +28,7 @@ class Config:
         hdv_db_file_name='hdv.db',
         train_db_file_name='train.db',
         test_db_file_name='test.db',
+        test_results_db_file_name='test_results.db',
     )
     
     def __init__(self, section_name='DEFAULT'):
@@ -51,6 +52,7 @@ class Config:
                 typ = type(type(self).DEFAULTS[k]) # enforce proper type (e.g. kernel_size must by int, not string)
                 setattr(self, k, typ(section[k]))
 
+### 
 class Logging(object):
     def __init__(self):
         self.logger = logging.getLogger('kmslog')
@@ -91,8 +93,69 @@ class Logging(object):
         self.update_prefix()
 
     def update_prefix(self):
-        self.prefix = '[' + ','.join(map(lambda s: f'{s}={self.prefix_stanzas[s]}', self.prefix_stanzas_order)) + ']'    
+        self.prefix = '[' + ','.join(map(lambda s: f'{s}={self.prefix_stanzas[s]}', self.prefix_stanzas_order)) + ']'
 
+### 
+class DBUtils:
+    @staticmethod
+    def is_table_exists(db_con, table_name):
+        cur = db_con.cursor() 
+        return len(cur.execute('SELECT name FROM sqlite_master WHERE type=:type AND name=:table_name', {'type': 'table', 'table_name': table_name}).fetchall()) > 0
+
+    @staticmethod
+    def is_table_empty(db_con, table_name):
+        cur = db_con.cursor() 
+        return len(cur.execute(f'SELECT * FROM {table_name} LIMIT 1').fetchall()) < 1
+
+    @staticmethod
+    def drop_table_safe(db_con, tn):
+        if is_table_exists(db_con, tn):
+            db_con.cursor().execute(f'DROP TABLE {tn}')
+            db_con.commit()
+
+    @staticmethod
+    def get_full_db_file_name(config, db_file_name, with_prefix=True):
+        return os.path.join(config.dataset_path, ('', config.db_file_name_prefix)[with_prefix] + db_file_name)
+
+###
+class MathUtils:
+    @staticmethod
+    def matrix_to_image(m):
+        m = m.ravel()
+        sz = int(np.sqrt(m.shape[0]))
+        assert sz * sz == m.shape[0]
+        return Image.frombytes('L', size=(sz, sz), data=m.astype('b'))
+    
+    @staticmethod
+    def softmax(x):
+        max_x = np.max(x)
+        exp_x = np.exp(x - max_x)
+        sum_exp_x = np.sum(exp_x)
+        return exp_x / sum_exp_x
+
+    @staticmethod
+    def conflate(pdfs):    
+        n = np.prod(pdfs, axis=0)
+        d = n.sum()
+    
+        if np.isclose(d, 0):
+            return np.zeros(len(pdfs))
+            
+        return n / d
+
+    @staticmethod
+    def moving_average(a, n=3):
+        ret = np.cumsum(a, dtype=float)
+        ret[n:] = ret[n:] - ret[:-n]
+        ret[:n-1] = np.array(a[:n-1]) * n
+        return ret / n
+
+    @staticmethod
+    def get_angle_diff(a_from, a_to):
+        andiff = a_to - a_from
+        return (andiff + 180) % 360 - 180
+
+### 
 # from https://gist.github.com/parente/691d150c934b89ce744b5d54103d7f1e
 def _html_src_from_raw_image_data(data):
     """Base64 encodes image bytes for inclusion in an HTML img element"""
@@ -194,12 +257,6 @@ def display_images_grid(images, col_count, col_width=None, captions=None):
         {''.join(figures)}
     </div>''')
 
-def matrix_to_image(m):
-    m = m.ravel()
-    sz = int(np.sqrt(m.shape[0]))
-    assert sz * sz == m.shape[0]
-    return Image.frombytes('L', size=(sz, sz), data=m.astype('b'))
-
 def lay_grid(image, step=16):
     draw = ImageDraw.Draw(image)
 
@@ -208,28 +265,3 @@ def lay_grid(image, step=16):
         draw.line([c, 0, c, image.height], fill='gray')
 
     return image
-
-def softmax(x):
-    max_x = np.max(x)
-    exp_x = np.exp(x - max_x)
-    sum_exp_x = np.sum(exp_x)
-    return exp_x / sum_exp_x
-
-def conflate(pdfs):    
-    n = np.prod(pdfs, axis=0)
-    d = n.sum()
-
-    if np.isclose(d, 0):
-        return np.zeros(len(pdfs))
-        
-    return n / d
-
-def moving_average(a, n=3):
-    ret = np.cumsum(a, dtype=float)
-    ret[n:] = ret[n:] - ret[:-n]
-    ret[:n-1] = np.array(a[:n-1]) * n
-    return ret / n
-
-def get_angle_diff(a_from, a_to):
-    andiff = a_to - a_from
-    return (andiff + 180) % 360 - 180
