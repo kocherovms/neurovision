@@ -120,10 +120,10 @@ class Hdc(object):
         return hdv1.astype(int) @ hdv2.astype(int) / (self.xp.linalg.norm(hdv1) *  self.xp.linalg.norm(hdv2)) # .astype(int) is a MUST, otherwise Geisenbugs with overflow may occur
 
 class HdvArray(object):
-    def __init__(self, N, xp, initial_length=10):
+    def __init__(self, N, xp, initial_length=10, dtype=None):
         self.xp = xp
         self.N = N
-        self.array = xp.zeros((initial_length, N))
+        self.array = xp.zeros((initial_length, N), dtype=dtype)
         self.free_indices = list(range(self.array.shape[0]))
         heapify(self.free_indices)
         self.leased_indices = set()
@@ -147,8 +147,8 @@ class HdvArray(object):
 
         current_array_size = self.array.shape[0]
         new_array_size = current_array_size * 2
-        # TODO: swtich to xp.resize
-        new_array = self.xp.zeros((new_array_size, self.N))
+        # TODO: swtich to xp.resize?
+        new_array = self.xp.zeros((new_array_size, self.N), self.array.dtype)
         new_array[:current_array_size] = self.array
         self.array = new_array
 

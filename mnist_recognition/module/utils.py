@@ -117,6 +117,25 @@ class DBUtils:
     def get_full_db_file_name(config, db_file_name, with_prefix=True):
         return os.path.join(config.dataset_path, ('', config.db_file_name_prefix)[with_prefix] + db_file_name)
 
+    @staticmethod
+    def get_column_names(db_con, table_name):
+        cur = db_con.cursor() 
+        return list(map(lambda row: row[1], cur.execute(f'PRAGMA table_info({table_name})').fetchall()))
+
+    @staticmethod
+    def ensure_table_columns(db_con, table_name, column_names):
+        cur = db_con.cursor() 
+        existing_column_names = set(map(lambda row: row[1], cur.execute(f'PRAGMA table_info({table_name})').fetchall()))
+        missing_column_names = set(column_names) - existing_column_names
+
+        if not missing_column_names:
+            return
+
+        for column_name in missing_column_names:
+            cur.execute(f'ALTER TABLE {table_name} ADD COLUMN {column_name}')
+
+        db_con.commit()
+
 ###
 class MathUtils:
     @staticmethod
