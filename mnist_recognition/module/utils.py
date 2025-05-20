@@ -109,7 +109,7 @@ class DBUtils:
 
     @staticmethod
     def drop_table_safe(db_con, tn):
-        if is_table_exists(db_con, tn):
+        if DBUtils.is_table_exists(db_con, tn):
             db_con.cursor().execute(f'DROP TABLE {tn}')
             db_con.commit()
 
