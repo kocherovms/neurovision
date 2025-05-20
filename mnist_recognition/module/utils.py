@@ -139,13 +139,6 @@ class DBUtils:
 ###
 class MathUtils:
     @staticmethod
-    def matrix_to_image(m):
-        m = m.ravel()
-        sz = int(np.sqrt(m.shape[0]))
-        assert sz * sz == m.shape[0]
-        return Image.frombytes('L', size=(sz, sz), data=m.astype('b'))
-    
-    @staticmethod
     def softmax(x):
         max_x = np.max(x)
         exp_x = np.exp(x - max_x)
@@ -275,6 +268,12 @@ def display_images_grid(images, col_count, col_width=None, captions=None):
         row-gap: 1px;">
         {''.join(figures)}
     </div>''')
+
+def matrix_to_image(m):
+    m = m.ravel()
+    sz = int(np.sqrt(m.shape[0]))
+    assert sz * sz == m.shape[0]
+    return Image.frombytes('L', size=(sz, sz), data=m.astype('b'))
 
 def lay_grid(image, step=16):
     draw = ImageDraw.Draw(image)
