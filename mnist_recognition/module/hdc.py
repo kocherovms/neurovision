@@ -120,7 +120,7 @@ class Hdc(object):
         return hdv1.astype(int) @ hdv2.astype(int) / (self.xp.linalg.norm(hdv1) *  self.xp.linalg.norm(hdv2)) # .astype(int) is a MUST, otherwise Geisenbugs with overflow may occur
 
 class HdvArray(object):
-    def __init__(self, N, xp, initial_length=10, dtype=None):
+    def __init__(self, N, xp, initial_length=10, dtype=None, grow_policy=None):
         self.xp = xp
         self.N = N
         self.array = xp.zeros((initial_length, N), dtype=dtype)
@@ -128,6 +128,7 @@ class HdvArray(object):
         heapify(self.free_indices)
         self.leased_indices = set()
         self.max_leased_index = -1
+        self.grow_policy = (lambda current_array_size: current_array_size * 2) if grow_policy is None else grow_policy
 
     @property
     def len(self):
@@ -146,11 +147,15 @@ class HdvArray(object):
             return index
 
         current_array_size = self.array.shape[0]
-        new_array_size = current_array_size * 2
-        # TODO: swtich to xp.resize?
-        new_array = self.xp.zeros((new_array_size, self.N), self.array.dtype)
-        new_array[:current_array_size] = self.array
-        self.array = new_array
+        new_array_size = self.grow_policy(current_array_size)
+        assert new_array_size > current_array_size
+        
+        # new_array = self.xp.zeros((new_array_size, self.N), self.array.dtype)
+        # new_array[:current_array_size] = self.array
+        # self.array = new_array
+
+        self.array = self.xp.resize(self.array, (new_array_size, self.N))
+        self.array[current_array_size:] = 0
 
         for free_index in range(current_array_size, self.array.shape[0]):
             heappush(self.free_indices, free_index)
@@ -182,4 +187,3 @@ class HdvArray(object):
     @property
     def array_active(self):
         return self.array[:self.active_len]
-        
