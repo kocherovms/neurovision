@@ -95,6 +95,34 @@ class Logging(object):
     def update_prefix(self):
         self.prefix = '[' + ','.join(map(lambda s: f'{s}={self.prefix_stanzas[s]}', self.prefix_stanzas_order)) + ']'
 
+    def auto_prefix(self, stanza_name, stanza_value, *args):
+        d = {stanza_name: stanza_value}
+        
+        if args:
+            assert len(args) % 2 == 0, f'args count is not even: {len(args)}'
+            
+            for ind in range(0, len(args), 2):
+                d[args[ind]] = args[ind+1] 
+            
+        return AutoLoggingPrefix(self, d)
+
+class AutoLoggingPrefix:
+    def __init__(self, logging, d):
+        self.logging = logging
+        self.d = d
+
+        for k, v in d.items():
+            self.logging.push_prefix(k, v)
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        for k in self.d:
+            self.logging.pop_prefix(k)
+            
+        return False
+        
 ### 
 class DBUtils:
     @staticmethod
