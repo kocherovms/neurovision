@@ -1,27 +1,28 @@
+import numpy as np
 from heapq import heapify, heappush, heappop
 
 class Hdc(object):
-    COS_SIM_THRESHOLD = 0.055
-    HDIST_THRESHOLD = 4700
-    
-    def __init__(self, N, xp):
+    def __init__(self, N, xp, dtype='b'):
         self.N = N
         self.xp = xp
-        self.source = self.xp.array([-1, +1], dtype='b')
-        self.bundle = self.bundle_noties
+        self.dtype = dtype
+        self.source = np.array([-1, +1], dtype=self.dtype)
 
         if self.xp.__name__ == 'cupy':
             self.wrap_list = lambda l: self.xp.array(l)
+            self.wrap_array = lambda a: self.xp.asarray(a)
         else:
             self.wrap_list = lambda l: l
+            self.wrap_array = lambda a: a
 
     def __call__(self, n=None):
         size = self.N if n is None else (n, self.N)
-        return self.xp.random.choice(self.source, size=size) # no cp.random.default_rng().choice in cupy :(
+        hdv = np.random.default_rng().choice(self.source, size=size) # RNG.choice on host (CPU) side is much faster than on GPU
+        return self.wrap_array(hdv)
 
     def zero(self, n=1):
         size = self.N if n==1 else (n, self.N)
-        return self.xp.zeros(size, dtype='b') 
+        return self.xp.zeros(size, dtype=self.dtype) 
 
     def normalize(self, hdv):
         if type(hdv) is list:
@@ -43,13 +44,7 @@ class Hdc(object):
         assert hdv.shape == (self.N,)
         return hdv * (-1)
 
-    # Hamming distance
-    def hdist(self, hdv1, hdv2):
-        assert hdv1.shape == (self.N,)
-        assert hdv2.shape == (self.N,)
-        return self.xp.count_nonzero(hdv1 != hdv2)
-
-    # Suitable with hdist, sim will produce lower numbers due to random -1/+1 deployed
+    # Suitable with hdist while sim will produce lower numbers due to random -1/+1 deployed
     def bundle_ties(self, hdv1, *hdvs):
         if type(hdv1) is list: # bundle([x1, x2])
             assert not hdvs # hdvs must be empty (not None!)
@@ -74,9 +69,9 @@ class Hdc(object):
             tie_breaker = self()
             sum = self.xp.sum(self.wrap_list([sum, tie_breaker]), axis=0)
             
-        return self.xp.sign(sum).astype('b')
+        return self.xp.sign(sum).astype(self.dtype)
 
-    # Suitable with sim. hdist will flicker due to even / odd number of hdvs in summation
+    # Suitable with sim while hdist will flicker due to even / odd number of hdvs in summation
     def bundle_noties(self, hdv1, *hdvs):
         if type(hdv1) is list: # bundle([x1, x2])
             assert not hdvs # hdvs must be empty (not None!)
@@ -96,7 +91,7 @@ class Hdc(object):
                     assert False, hdv1.shape
 
         sum = self.xp.sum(hdvs, axis=0)
-        return self.xp.sign(sum).astype('b')
+        return self.xp.sign(sum).astype(self.dtype)
 
     def debundle(self, hdv_bundle, hdv):
         assert hdv_bundle.shape == (self.N,)
@@ -107,17 +102,31 @@ class Hdc(object):
     def bind(self, hdv1, hdv2):
         assert hdv1.shape == (self.N,)
         assert hdv2.shape == (self.N,)
-        return self.xp.prod(self.xp.array([hdv1, hdv2]), axis=0).astype('b')
+        return self.xp.prod(self.xp.array([hdv1, hdv2]), axis=0).astype(self.dtype)
         
     def shift(self, hdv, k=1):
         assert hdv.shape == (self.N,)
-        return self.xp.roll(hdv, k).astype('b')
+        return self.xp.roll(hdv, k).astype(self.dtype)
 
+    def to_binary(self, bipolar_hdv):
+        tie_breaker = self()
+        t = self.xp.where(bipolar_hdv == 0, tie_breaker, bipolar_hdv) # [-1, 0, +1, 0, ...] -> [-1, rnd(-1,+1), 1, rnd(-1,+1), ...]
+        return (t > 0).astype(self.dtype) # [-1, +1, +1, -1, ...] -> [0, 1, 1, 0, ...]
+
+    def to_bipolar(self, binary_hdv):
+        return self.xp.where(binary_hdv == 0, -1, +1)
+
+    # Hamming distance
+    def hdist(self, hdv1, hdv2):
+        assert hdv1.shape == (self.N,)
+        assert hdv2.shape == (self.N,)
+        return self.xp.count_nonzero(hdv1 != hdv2)
+    
     # Cosine similarity
     def sim(self, hdv1, hdv2):
         assert hdv1.shape == (self.N,)
         assert hdv2.shape == (self.N,)
-        return hdv1.astype(int) @ hdv2.astype(int) / (self.xp.linalg.norm(hdv1) *  self.xp.linalg.norm(hdv2)) # .astype(int) is a MUST, otherwise Geisenbugs with overflow may occur
+        return hdv1.astype('f') @ hdv2.astype('f') / (self.xp.linalg.norm(hdv1) * self.xp.linalg.norm(hdv2)) # .astype('f') is a MUST, otherwise Geisenbugs with overflow may occur
 
 class HdvArray(object):
     def __init__(self, N, xp, initial_length=10, dtype=None, grow_policy=None):
@@ -150,10 +159,6 @@ class HdvArray(object):
         new_array_size = self.grow_policy(current_array_size)
         assert new_array_size > current_array_size
         
-        # new_array = self.xp.zeros((new_array_size, self.N), self.array.dtype)
-        # new_array[:current_array_size] = self.array
-        # self.array = new_array
-
         self.array = self.xp.resize(self.array, (new_array_size, self.N))
         self.array[current_array_size:] = 0
 

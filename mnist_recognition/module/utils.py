@@ -297,6 +297,11 @@ def display_images_grid(images, col_count, col_width=None, captions=None):
         {''.join(figures)}
     </div>''')
 
+def vec_to_square_matrix(v):
+    sz = int(np.sqrt(v.shape[0]))
+    assert sz * sz == v.shape[0]
+    return v.reshape(sz, -1)
+
 def matrix_to_image(m):
     m = m.ravel()
     sz = int(np.sqrt(m.shape[0]))
