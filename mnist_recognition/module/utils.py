@@ -29,6 +29,7 @@ class Config:
         train_db_file_name='train.db',
         test_db_file_name='test.db',
         test_results_db_file_name='test_results.db',
+        transfs_db_file_name='transfs.db',
     )
     
     def __init__(self, section_name='DEFAULT'):
