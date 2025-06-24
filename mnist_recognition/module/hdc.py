@@ -132,7 +132,8 @@ class HdvArray(object):
     def __init__(self, N, xp, initial_length=10, dtype=None, grow_policy=None):
         self.xp = xp
         self.N = N
-        self.array = xp.zeros((initial_length, N), dtype=dtype)
+        self.initial_length = initial_length
+        self.array = xp.zeros((self.initial_length, N), dtype=dtype)
         self.free_indices = list(range(self.array.shape[0]))
         heapify(self.free_indices)
         self.leased_indices = set()
@@ -182,12 +183,16 @@ class HdvArray(object):
             
         self.array[index] = 0
 
-    def clear(self):
+    def clear(self, is_hard_clear=False):
+        if is_hard_clear:
+            self.array = self.xp.zeros((self.initial_length, self.N), dtype=self.array.dtype)
+        else:
+            self.array[:] = 0
+            
         self.free_indices = list(range(self.array.shape[0]))
         heapify(self.free_indices)
         self.leased_indices = set()
         self.max_leased_index = -1
-        self.array[:] = 0
 
     @property
     def array_active(self):
