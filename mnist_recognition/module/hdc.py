@@ -172,7 +172,7 @@ class HdvArray(object):
         self.max_leased_index = max(self.max_leased_index, index)
         return index
 
-    def release(self, index):
+    def release(self, index, do_wipeout_data=True):
         assert index in self.leased_indices
         heappush(self.free_indices, index)
         self.leased_indices.discard(index)
@@ -180,8 +180,9 @@ class HdvArray(object):
         if index == self.max_leased_index:
             # max on set of say 50k takes xxx microseconds. So rescan only when max_leased_index was popped!
             self.max_leased_index = max(self.leased_indices) if self.leased_indices else -1
-            
-        self.array[index] = 0
+
+        if do_wipeout_data:
+            self.array[index] = 0
 
     def clear(self, is_hard_clear=False):
         if is_hard_clear:
