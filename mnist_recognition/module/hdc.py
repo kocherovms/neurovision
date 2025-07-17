@@ -129,7 +129,7 @@ class Hdc(object):
         return hdv1.astype('f') @ hdv2.astype('f') / (self.xp.linalg.norm(hdv1) * self.xp.linalg.norm(hdv2)) # .astype('f') is a MUST, otherwise Geisenbugs with overflow may occur
 
 class HdvArray(object):
-    def __init__(self, N, xp, initial_length=10, dtype=None, grow_policy=None):
+    def __init__(self, N, xp, initial_length=10, dtype=None, grow_policy=None, observer=None):
         self.xp = xp
         self.N = N
         self.initial_length = initial_length
@@ -139,6 +139,8 @@ class HdvArray(object):
         self.leased_indices = set()
         self.max_leased_index = -1
         self.grow_policy = (lambda current_array_size: current_array_size * 2) if grow_policy is None else grow_policy
+        self.observer = observer
+        self.__notify_observer()
 
     @property
     def len(self):
@@ -162,6 +164,7 @@ class HdvArray(object):
         
         self.array = self.xp.resize(self.array, (new_array_size, self.N))
         self.array[current_array_size:] = 0
+        self.__notify_observer()
 
         for free_index in range(current_array_size, self.array.shape[0]):
             heappush(self.free_indices, free_index)
@@ -187,6 +190,7 @@ class HdvArray(object):
     def clear(self, is_hard_clear=False):
         if is_hard_clear:
             self.array = self.xp.zeros((self.initial_length, self.N), dtype=self.array.dtype)
+            self.__notify_observer()
         else:
             self.array[:] = 0
             
@@ -198,3 +202,12 @@ class HdvArray(object):
     @property
     def array_active(self):
         return self.array[:self.active_len]
+
+    def __notify_observer(self):
+        if not self.observer is None:
+            self.observer.size_changed(self.array.shape[0])
+            
+
+class HdvArrayObserver:
+    def size_changed(self, new_size):
+        raise NotImplementedError()
