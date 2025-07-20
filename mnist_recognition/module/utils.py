@@ -71,7 +71,12 @@ class Logging(object):
         
     def __call__(self, s):
         if self.is_enabled:
-            self.logger.debug(self.prefix + ' ' + s)
+            msg = ' ' # without this space following 'PID:'... will be considered as a part of syslogtag by rsyslog, so separate forcibly
+            msg += 'PID:' + str(os.getpid())
+            msg += ' ' + self.prefix
+            msg += ' ' if self.prefix else ''
+            msg += s
+            self.logger.debug(msg)
 
     def push_prefix(self, stanza_name, stanza_value):
         if stanza_name in self.prefix_stanzas:
@@ -94,7 +99,10 @@ class Logging(object):
         self.update_prefix()
 
     def update_prefix(self):
-        self.prefix = '[' + ','.join(map(lambda s: f'{s}={self.prefix_stanzas[s]}', self.prefix_stanzas_order)) + ']'
+        self.prefix = ''
+
+        if self.prefix_stanzas_order:
+            self.prefix = '[' + ','.join(map(lambda s: f'{s}={self.prefix_stanzas[s]}', self.prefix_stanzas_order)) + ']'
 
     def auto_prefix(self, stanza_name, stanza_value, *args):
         d = {stanza_name: stanza_value}
