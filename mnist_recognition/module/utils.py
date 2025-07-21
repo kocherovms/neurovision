@@ -64,6 +64,7 @@ class Logging(object):
             syslogHandler.ident = 'kmstag:'
             self.logger.addHandler(syslogHandler)
 
+        self.app_name = 'MAIN'
         self.prefix_stanzas = dict()
         self.prefix_stanzas_order = []
         self.prefix = ''
@@ -72,7 +73,7 @@ class Logging(object):
     def __call__(self, s):
         if self.is_enabled:
             msg = ' ' # without this space following 'PID:'... will be considered as a part of syslogtag by rsyslog, so separate forcibly
-            msg += 'PID:' + str(os.getpid())
+            msg += f'PID:{os.getpid():<10} APP:{self.app_name:<15}'
             msg += ' ' + self.prefix
             msg += ' ' if self.prefix else ''
             msg += s
