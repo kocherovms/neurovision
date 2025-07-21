@@ -1,6 +1,7 @@
 import os, io
 import configparser
 import numpy as np
+import time
 import IPython
 from PIL import Image, ImageDraw
 import logging
@@ -69,15 +70,25 @@ class Logging(object):
         self.prefix_stanzas_order = []
         self.prefix = ''
         self.is_enabled = True
+        self.last_log_time = time.time()
         
-    def __call__(self, s):
+    def __call__(self, s, with_duration=True):
+        t = time.time()
+        
         if self.is_enabled:
             msg = ' ' # without this space following 'PID:'... will be considered as a part of syslogtag by rsyslog, so separate forcibly
             msg += f'PID:{os.getpid():<10} APP:{self.app_name:<15}'
             msg += ' ' + self.prefix
             msg += ' ' if self.prefix else ''
+            
+            if with_duration:
+                duration = max(0, t - self.last_log_time)
+                msg += f'{duration:>9.3f} >> '
+                
             msg += s
             self.logger.debug(msg)
+
+        self.last_log_time = t
 
     def push_prefix(self, stanza_name, stanza_value):
         if stanza_name in self.prefix_stanzas:
