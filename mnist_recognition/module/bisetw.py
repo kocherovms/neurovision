@@ -17,6 +17,12 @@ class bisetw:
         key = np.require(key, dtype=np.int32, requirements=['C_CONTIGUOUS'])
         return biset.biset_contains(self.inst, key.shape[0], key)
 
+    def get(self, key):
+        assert key.ndim == 1, key.ndim
+
+        key = np.require(key, dtype=np.int32, requirements=['C_CONTIGUOUS'])
+        return biset.biset_get(self.inst, key.shape[0], key)
+
     def add_many(self, keys, key_sizes=None):
         assert keys.ndim == 2, keys.ndim
 
@@ -94,12 +100,11 @@ class bisetw:
     def replace(self, key_from, key_to):
         assert key_from.ndim == 1, key_from.ndim
         assert key_to.ndim == 1, key_to.ndim
-        assert key_from.shape == key_to.shape
 
         key_from = np.require(key_from, dtype=np.int32, requirements=['C_CONTIGUOUS'])
         key_to = np.require(key_to, dtype=np.int32, requirements=['C_CONTIGUOUS'])
         
-        biset.biset_replace(self.inst, key_from.shape[0], key_from, key_to.shape[0], key_to)
+        return biset.biset_replace(self.inst, key_from.shape[0], key_from, key_to.shape[0], key_to)
 
     def clear(self):
         biset.biset_clear(self.inst)

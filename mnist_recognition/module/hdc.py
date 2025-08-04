@@ -175,6 +175,42 @@ class HdvArray(object):
         self.max_leased_index = max(self.max_leased_index, index)
         return index
 
+    def lease_many(self, count):
+        indices = []
+        
+        while len(indices) < count:
+            remn = count - len(indices)
+            assert remn >= 0
+            
+            if len(self.free_indices) > remn:
+                self.free_indices.sort()
+                
+            inds_batch = self.free_indices[:remn]
+            self.free_indices = self.free_indices[remn:]
+
+            if inds_batch:
+                len_before = len(self.leased_indices)
+                self.leased_indices.update(inds_batch)
+                assert len(self.leased_indices) == len_before + len(inds_batch)
+                indices.extend(inds_batch)
+
+            if len(indices) < count:
+                assert len(self.free_indices) == 0
+                
+                current_array_size = self.array.shape[0]
+                new_array_size = self.grow_policy(current_array_size)
+                assert new_array_size > current_array_size
+                
+                self.array = self.xp.resize(self.array, (new_array_size, self.N))
+                self.array[current_array_size:] = 0
+                self.__notify_observer()
+                self.free_indices.extend(range(current_array_size, self.array.shape[0]))
+
+        assert len(indices) == count
+        self.max_leased_index = max(self.leased_indices) if self.leased_indices else -1
+        heapify(self.free_indices)
+        return indices
+
     def release(self, index, do_wipeout_data=True):
         assert index in self.leased_indices
         heappush(self.free_indices, index)
@@ -186,6 +222,20 @@ class HdvArray(object):
 
         if do_wipeout_data:
             self.array[index] = 0
+
+    def release_many(self, indices, do_wipeout_data=True):
+        indices_set = set(indices)
+        assert len(indices_set) == len(indices)
+        len_before = len(self.leased_indices)
+        self.leased_indices -= indices_set
+        assert len(self.leased_indices) == len_before - len(indices)
+
+        self.free_indices.extend(indices)
+        heapify(self.free_indices)
+        self.max_leased_index = max(self.leased_indices) if self.leased_indices else -1
+
+        if do_wipeout_data:
+            self.array[np.array(indices)] = 0
 
     def clear(self, is_hard_clear=False):
         if is_hard_clear:

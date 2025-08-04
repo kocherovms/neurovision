@@ -102,6 +102,45 @@ biset_contains(PyObject *, PyObject * theArgs) {
 }
 
 static PyObject *
+biset_get(PyObject *, PyObject * theArgs) {
+    long long inst = 0;
+    int keySize = 0;
+    Py_buffer keyBuf;
+    
+    if(!PyArg_ParseTuple(theArgs, "Liy*", &inst, &keySize, &keyBuf))
+        return NULL;
+
+    PyObject * rv = NULL;
+
+    if(inst && keySize >= 0 && keyBuf.buf) {
+        const biset * const s = (biset *)inst;
+        const int * const key = (int *)keyBuf.buf;
+        const std::vector<int> v(key, key + keySize);
+        const auto it = s->find(v);
+
+        if(it != s->end()) {
+            rv = PyList_New(0);
+            assert(rv);
+
+            for(int i: v) {
+                PyObject * const pyI = PyLong_FromLong(i);
+                assert(pyI);
+                PyList_Append(rv, pyI);
+            }
+        }
+        else {
+            PyErr_Format(PyExc_KeyError, "%s", get_key_repr(0, v).c_str());
+        }
+    }
+    else {
+        PyErr_SetString(PyExc_Exception, "bad arguments");
+    }
+    
+    PyBuffer_Release(&keyBuf);
+    return rv;
+}
+
+static PyObject *
 biset_add_many(PyObject *, PyObject * theArgs) {
     long long inst = 0;
     int keysCount = 0;
@@ -370,15 +409,15 @@ biset_replace(PyObject *, PyObject * theArgs) {
                 // keyFrom exists, but keyTo doesn't - normal case
                 s->erase(itFrom);
                 s->insert(vTo);
-                rv = Py_None;
+                rv = Py_True;
             }
             else if(itFrom == itTo) {
                 // keyFrom exists, but keyTo exists and they are the same - normal case
-                rv = Py_None;
+                rv = Py_True;
             }
             else {
                 // keyFrom exists, but keyTo exists as well as it's different - conflict or duplicate
-                PyErr_Format(PyExc_KeyError, "keyTo %s", get_key_repr(0, vTo).c_str());
+                rv = Py_False;
             }
         }
         else {
@@ -414,6 +453,7 @@ static PyMethodDef biset_methods[] = {
     {"biset_destroy", biset_destroy, METH_VARARGS, ""},
     {"biset_get_len", biset_get_len, METH_VARARGS, ""},
     {"biset_contains", biset_contains, METH_VARARGS, ""},
+    {"biset_get", biset_get, METH_VARARGS, ""},
     {"biset_add_many", biset_add_many, METH_VARARGS, ""},
     {"biset_add", biset_add, METH_VARARGS, ""},
     {"biset_remove_many", biset_remove_many, METH_VARARGS, ""},
