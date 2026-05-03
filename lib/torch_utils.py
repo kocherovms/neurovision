@@ -1,3 +1,5 @@
+import numpy as np
+import torch
 import torch.optim
 
 class LrSchedulerWrapper:
@@ -47,4 +49,6 @@ def eval_guard(model):
 
 def train_guard(model):
     return ModelModeContextManager(model, 'train')
-    
+
+def numpy_dtype_to_torch_dtype(np_dtype):
+    return torch.from_numpy(np.array([], dtype=np_dtype)).dtype
