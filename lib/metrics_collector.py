@@ -48,19 +48,28 @@ class RmqSummaryWriter(RmqSummaryBase):
     def __init__(self, log_dir, rmq_connection_url=RMQ_DEFAULT_CONNECTION_URL):
         super().__init__(rmq_connection_url)
         self.log_dir = log_dir
+        self.scalar_batch = []
 
-    def add_scalar(self, tag, scalar_value, global_step):
+    def add_scalar(self, tag, scalar_value, global_step, is_batched=False):
+        """
+        is_batched=True is an optimization. All values will be staged and written only on flush(). This way
+        we avoid overload of RabbitMQ with too frequent messages
+        """
+        if is_batched:
+            self.scalar_batch.append((tag, scalar_value, global_step))
+            return
+            
         properties = self._create_message_properties('add_scalar')
         properties.headers['tag'] = tag
         properties.headers['global_step'] = global_step
         
         with io.BytesIO() as b:
-            if isinstance(scalar_value, torch.Tensor):
+            if isinstance(scalar_value, torch.Tensor) or isinstance(scalar_value, np.ndarray):
                 scalar_value = scalar_value.item()
                 
             pickle.dump(scalar_value, b)
             self._robust_publish(body=b.getvalue(), properties=properties)
-
+    
     def add_text(self, tag, text_string, global_step):
         properties = self._create_message_properties('add_text')
         properties.headers['tag'] = tag
@@ -112,8 +121,24 @@ class RmqSummaryWriter(RmqSummaryBase):
         self._robust_publish(body=body.encode(), properties=properties)
 
     def flush(self):
-        properties = self._create_message_properties('flush')
-        self._robust_publish(body='', properties=properties)
+        if not self.scalar_batch:
+            properties = self._create_message_properties('flush')
+            self._robust_publish(body='', properties=properties)
+        else:
+            scalar_values = []
+            
+            for i, (tag, scalar_value, global_step) in enumerate(scalar_batch):
+                properties.headers[f'tag_{i}'] = tag
+                properties.headers[f'global_step_{i}'] = global_step
+                
+                if isinstance(scalar_value, torch.Tensor) or isinstance(scalar_value, np.ndarray):
+                    scalar_value = scalar_value.item()
+
+                scalar_values.append(scalar_value)
+                
+            with io.BytesIO() as b:
+                pickle.dump(scalar_values, b)
+                self._robust_publish(body=b.getvalue(), properties=properties)
 
     def _robust_publish(self, body, properties):
         for attempt_no in range(2):
@@ -226,7 +251,19 @@ class RmqSummaryCollector(RmqSummaryBase):
                     self.get_summary_writer(log_dir).add_hparams(hparam_dict, metric_dict, run_name=run_name)
                     print(f'add_hparams, {log_dir=}, {hparam_dict=}, {metric_dict=}, {run_name=}')
             case 'flush':
-                self.get_summary_writer(log_dir).flush()
+                sw = self.get_summary_writer(log_dir)
+
+                if len(body) > 0:
+                    with io.BytesIO(body) as b:
+                        scalar_values = pickle.load(b)
+
+                        for i, scalar_value in enumerate(scalar_values):
+                            tag = properties.headers[f'tag_{i}']
+                            global_step = int(properties.headers[f'global_step_{i}'])
+                            sw.add_scalar(tag, scalar_value, global_step)
+                            print(f'add_scalar (on flush), {log_dir=}, {tag=}, {scalar_value=}, {global_step=}')
+                
+                sw.flush()
                 print('flush')
             case _:
                 assert False, f'Unknown method="{logic_method}"'
