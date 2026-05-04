@@ -14,13 +14,13 @@ class LrSchedulerWrapper:
             self.scheduler = None
             self.step = self.step_dummy
 
-    def step_dummy(self, loss):
+    def step_dummy(self, value):
         pass
     
-    def step_plateau(self, loss):
-        self.scheduler.step(loss)
+    def step_plateau(self, value):
+        self.scheduler.step(value)
 
-    def step_linear(self, loss):
+    def step_linear(self, value=None):
         self.scheduler.step()
 
 class ModelModeContextManager:
