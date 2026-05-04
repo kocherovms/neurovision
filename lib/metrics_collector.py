@@ -121,13 +121,14 @@ class RmqSummaryWriter(RmqSummaryBase):
         self._robust_publish(body=body.encode(), properties=properties)
 
     def flush(self):
+        properties = self._create_message_properties('flush')
+        
         if not self.scalar_batch:
-            properties = self._create_message_properties('flush')
             self._robust_publish(body='', properties=properties)
         else:
             scalar_values = []
             
-            for i, (tag, scalar_value, global_step) in enumerate(scalar_batch):
+            for i, (tag, scalar_value, global_step) in enumerate(self.scalar_batch):
                 properties.headers[f'tag_{i}'] = tag
                 properties.headers[f'global_step_{i}'] = global_step
                 
@@ -139,6 +140,8 @@ class RmqSummaryWriter(RmqSummaryBase):
             with io.BytesIO() as b:
                 pickle.dump(scalar_values, b)
                 self._robust_publish(body=b.getvalue(), properties=properties)
+
+            self.scalar_batch = []
 
     def _robust_publish(self, body, properties):
         for attempt_no in range(2):
