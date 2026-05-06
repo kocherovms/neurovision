@@ -52,3 +52,13 @@ def train_guard(model):
 
 def numpy_dtype_to_torch_dtype(np_dtype):
     return torch.from_numpy(np.array([], dtype=np_dtype)).dtype
+
+def get_linear_anneal(start_value, end_value, steps_count):
+    def anneal_param(step):
+        if steps_count <= 0 or step >= steps_count:
+            return end_value
+            
+        frac = 1 - step / steps_count
+        return (start_value - end_value) * frac + end_value
+
+    return anneal_param
