@@ -175,7 +175,8 @@ def index(req_path):
         meta['video'] = meta.get('video', {})
         meta['video']['formatted_duration'] = format_duration(meta['video'].get('duration', None))
         meta['game'] = meta.get('game', {})
-        meta['game']['reward'] = int(meta['game'].get('reward', 0))
+        ret = float(meta['game'].get('reward', 0))
+        meta['game']['reward'] = lu.when(ret.is_integer(), lambda: str(int(ret)), lambda: f'{ret:.2f}')
         metas[v] = meta
 
         if is_video and v == os.path.basename(req_path):
