@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 def from_str(cast_func, s, default_value):
     try:
@@ -40,3 +41,7 @@ def to_number(v):
         return float(v)
     else:
         return int(v)
+
+@dataclass
+class ScopedVars:
+    pass
