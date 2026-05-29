@@ -35,6 +35,12 @@ class RecursiveAverageFilter:
         self.n = 0
         self.v = 0
 
+    def reset(self):
+        v = self.v
+        self.n = 0
+        self.v = 0
+        return v
+
     def __call__(self, x, batch_size=1):
         n_new = self.n + batch_size
         self.v = (self.n * self.v + batch_size * x) / n_new

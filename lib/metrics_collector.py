@@ -50,7 +50,7 @@ class RmqSummaryWriter(RmqSummaryBase):
         self.log_dir = log_dir
         self.scalar_batch = []
 
-    def add_scalar(self, tag, scalar_value, global_step, is_batched=False):
+    def add_scalar(self, tag, scalar_value, global_step, is_batched=True):
         """
         is_batched=True is an optimization. All values will be staged and written only on flush(). This way
         we avoid overload of RabbitMQ with too frequent messages

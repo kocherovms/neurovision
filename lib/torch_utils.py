@@ -1,3 +1,5 @@
+from collections import defaultdict
+import math
 import numpy as np
 import torch
 import torch.optim
@@ -62,3 +64,22 @@ def get_linear_anneal(start_value, end_value, steps_count):
         return (start_value - end_value) * frac + end_value
 
     return anneal_param
+
+def get_grad_norm_groups(model, group_names):
+    norms = defaultdict(list)
+    
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            grad_sum_squares = torch.sum(param.grad.detach() ** 2).item()
+
+            for group_name in group_names:
+                if group_name in name:
+                    norms[group_name].append(grad_sum_squares)
+                    break
+
+    result = {}
+    
+    for k, v in norms.items():
+        result[k] = math.sqrt(sum(v)) if v else 0.0
+
+    return result
