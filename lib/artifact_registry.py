@@ -189,13 +189,14 @@ class S3ArtifactRegistry:
         metadata = dict(
             maven_group_id=self.maven_group_id,
             comp_name=comp_name,
-            comp_version=comp_version,
+            comp_version=str(comp_version),
             asset_ext=asset_ext,
             asset_classifier=asset_classifier,
         )
         
         if isinstance(asset, str):
-            metadata['asset_ext'] = os.path.splitext(asset)[1].lstrip('.')
+            asset_ext = os.path.splitext(asset)[1].lstrip('.')
+            metadata['asset_ext'] = asset_ext
         else:
             assert metadata['asset_ext'], 'asset_ext arg must be specified'
             
@@ -209,7 +210,15 @@ class S3ArtifactRegistry:
                     Body=asset_file,
                     Metadata=metadata,
                 )
-        elif isinstance(asset, io.IOBase):
+        elif isinstance(asset, io.StringIO):
+            asset.seek(0)
+            self.s3.put_object(
+                Bucket=self.s3_bucket_name,
+                Key=key,
+                Body=asset.getvalue(),
+                Metadata=metadata,
+            )
+        elif isinstance(asset, io.BytesIO):
             asset.seek(0)
             self.s3.put_object(
                 Bucket=self.s3_bucket_name,

@@ -516,7 +516,7 @@ class S3SummaryCollector:
             comp_name=metadata['comp_name'],
             comp_version=metadata['comp_version'],
             asset=io.BytesIO(asset),
-            asset_classifier=metadata['asset_classifier'],
+            asset_classifier=metadata.get('asset_classifier', None),
             asset_ext=metadata['asset_ext'],
             replace=True,
         )
