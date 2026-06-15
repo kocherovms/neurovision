@@ -4,9 +4,13 @@ import pickle
 import io
 import json
 from functools import lru_cache
+import time
 
 import pika
 import pika.exceptions
+import boto3
+
+import base64
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.backends.backend_agg as plt_backend_agg
@@ -16,10 +20,25 @@ import torch
 import av # video support
 
 import lang_utils as lu
+from logging_utils import *
+from artifact_registry import *
 
 RMQ_EVENTS_EXCHANGE_NAME = 'events'
 RMQ_EVENTS_QUEUE_NAME = 'events'
 RMQ_DEFAULT_CONNECTION_URL = 'amqp://guest:guest@rabbitmq:5672/%2F'
+
+def _figure_to_image(figure, close):
+    canvas = plt_backend_agg.FigureCanvasAgg(figure)
+    canvas.draw()
+    data = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
+    w, h = figure.canvas.get_width_height()
+    image_hwc = data.reshape([h, w, 4])[:, :, 0:3]
+    image_chw = np.moveaxis(image_hwc, source=2, destination=0)
+    
+    if close:
+        plt.close(figure)
+    
+    return image_chw
 
 class RmqSummaryBase:
     def __init__(self, rmq_connection_url=RMQ_DEFAULT_CONNECTION_URL):
@@ -82,7 +101,7 @@ class RmqSummaryWriter(RmqSummaryBase):
         properties.headers['global_step'] = global_step
 
         with io.BytesIO() as b:
-            image = self._figure_to_image(figure, close)
+            image = _figure_to_image(figure, close)
             pickle.dump(image, b)
             self._robust_publish(body=b.getvalue(), properties=properties)
 
@@ -158,19 +177,6 @@ class RmqSummaryWriter(RmqSummaryBase):
                 else:
                     raise
 
-    def _figure_to_image(self, figure, close):
-        canvas = plt_backend_agg.FigureCanvasAgg(figure)
-        canvas.draw()
-        data = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
-        w, h = figure.canvas.get_width_height()
-        image_hwc = data.reshape([h, w, 4])[:, :, 0:3]
-        image_chw = np.moveaxis(image_hwc, source=2, destination=0)
-        
-        if close:
-            plt.close(figure)
-        
-        return image_chw
-
     def _create_message_properties(self, method):
         return pika.spec.BasicProperties(
             headers={
@@ -179,6 +185,103 @@ class RmqSummaryWriter(RmqSummaryBase):
             },
             delivery_mode=pika.DeliveryMode.Persistent,
         )
+
+class S3SummaryWriter:
+    def __init__(self, log_dir, s3_endpoint_url, s3_bucket_name):
+        self.log_dir = log_dir
+        self.s3_bucket_name = s3_bucket_name
+        self.s3 = boto3.client('s3', endpoint_url=s3_endpoint_url)
+        self.batch = []
+        self.batch_counter = 0
+
+    def add_scalar(self, tag, scalar_value, global_step):
+        batch_item = dict(
+            method='add_scalar',
+            tag=tag,
+            scalar_value=scalar_value,
+            global_step=global_step,
+        )
+        self.batch.append(batch_item)
+    
+    def add_text(self, tag, text_string, global_step):
+        batch_item = dict(
+            method='add_text',
+            tag=tag,
+            text_string=text_string,
+            global_step=global_step,
+        )
+        self.batch.append(batch_item)
+        
+    def add_figure(self, tag, figure, global_step, close):
+        with io.BytesIO() as b:
+            image = _figure_to_image(figure, close)
+            pickle.dump(image, b)
+            b.seek(0)
+            batch_item = dict(
+                method='add_figure',
+                tag=tag,
+                figure=base64.b64encode(b.getvalue()).decode('utf-8'),
+                global_step=global_step,
+            )
+            
+        self.batch.append(batch_item)
+
+    # To distinguish from SummaryWriter.add_video which incepts raw video frames
+    def add_video_file(self, tag, video_file, global_step):
+        batch_item = dict(
+            method='add_video_file',
+            tag=tag,
+            video_file=None,
+            global_step=global_step,
+        )
+        
+        if isinstance(video_file, io.IOBase):
+            video_file.seek(0)
+            batch_item['video_file'] = base64.b64encode(video_file.read()).decode('utf-8')
+        else:
+            with open(video_file, 'rb') as f:
+                batch_item['video_file'] = base64.b64encode(f.read()).decode('utf-8')
+
+        self.batch.append(batch_item)
+
+    def add_file(self, file, file_name):
+        batch_item = dict(
+            method='add_file',
+            file=None,
+            file_name=file_name,
+        )
+        
+        if isinstance(file, io.IOBase):
+            file.seek(0)
+            batch_item['file'] = base64.b64encode(file.read()).decode('utf-8')
+        else:
+            with open(file, 'rb') as f:
+                batch_item['file'] = base64.b64encode(f.read()).decode('utf-8')
+
+        self.batch.append(batch_item)
+
+    def add_hparams(self, hparam_dict, metric_dict, run_name):
+        batch_item = dict(
+            method='add_hparams',
+            hparam_dict=hparam_dict, 
+            metric_dict=metric_dict, 
+            run_name=run_name,
+        )
+        self.batch.append(batch_item)
+    
+    def flush(self):
+        if not self.batch:
+            return
+
+        key = f'{self.log_dir}/metrics/batch_{self.batch_counter:09d}.json'
+        self.s3.put_object(
+            Bucket=self.s3_bucket_name,
+            Key=key,
+            Body=json.dumps(self.batch),
+            ContentType='application/json'
+        )
+        self.batch_counter += 1
+        self.batch = []
 
 class RmqSummaryCollector(RmqSummaryBase):
     def __init__(self, base_log_dir, rmq_connection_url):
@@ -194,7 +297,7 @@ class RmqSummaryCollector(RmqSummaryBase):
         self.channel.start_consuming()
 
     def on_message(self, ch, method, properties, body):
-        # print(f'on_message: method={method}, properties={properties}, len(body)={len(body)}')
+        Logging.get().trace(f'on_message: method={method}, properties={properties}, len(body)={len(body)}')
         logic_method = properties.headers['method']
         log_dir = properties.headers['log_dir']
         global_step = properties.headers.get('global_step', None)
@@ -207,16 +310,16 @@ class RmqSummaryCollector(RmqSummaryBase):
                 with io.BytesIO(body) as b:
                     scalar_value = pickle.load(b)
                     self.get_summary_writer(log_dir).add_scalar(tag, scalar_value, global_step)
-                    print(f'add_scalar, {log_dir=}, {tag=}, {scalar_value=}, {global_step=}')
+                    Logging.get().info(f'add_scalar, {log_dir=}, {tag=}, {scalar_value=}, {global_step=}')
             case 'add_text':
                 text_string = body.decode()
                 self.get_summary_writer(log_dir).add_text(tag, text_string, global_step)
-                print(f'add_text, {log_dir=}, {tag=}, {text_string[:1000]=}, {global_step=}')
+                Logging.get().info(f'add_text, {log_dir=}, {tag=}, {text_string[:1000]=}, {global_step=}')
             case 'add_figure':
                 with io.BytesIO(body) as b:
                     image_data = pickle.load(b)
                     self.get_summary_writer(log_dir).add_image(tag, image_data, global_step)
-                    print(f'add_figure, {log_dir=}, {tag=}, {image_data.shape=}, {global_step=}')
+                    Logging.get().info(f'add_figure, {log_dir=}, {tag=}, {image_data.shape=}, {global_step=}')
             case 'add_video_file':
                 video_file_len = len(body)
                 # Perform transcoding and upload to tensorboard UI. Very slow. In fact produces animated GIF from video file
@@ -236,7 +339,7 @@ class RmqSummaryCollector(RmqSummaryBase):
                     # add Batch dim (N=1) and move Channels (C) to index 2
                     video_tensor = video_tensor.unsqueeze(0).permute(0, 1, 4, 2, 3)
                     self.get_summary_writer(log_dir).add_video(tag, video_tensor, global_step, fps)
-                    print(f'add_video_file, {log_dir=}, {tag=}, {video_tensor.shape=} ({video_tensor.dtype}) ({video_file_len} bytes), {global_step=}, {fps=}')
+                    Logging.get().info(f'add_video_file, {log_dir=}, {tag=}, {video_tensor.shape=} ({video_tensor.dtype}) ({video_file_len} bytes), {global_step=}, {fps=}')
             case 'add_file':
                 file_len = len(body)
                 full_log_dir = os.path.join(self.base_log_dir, log_dir.lstrip('/'))
@@ -245,14 +348,14 @@ class RmqSummaryCollector(RmqSummaryBase):
                 with open(os.path.join(full_log_dir, file_name), 'wb') as f:
                     f.write(body)
 
-                print(f'add_file, {log_dir=}, {file_name=} ({file_len} bytes)')
+                Logging.get().info(f'add_file, {log_dir=}, {file_name=} ({file_len} bytes)')
             case 'add_hparams':
                 with io.BytesIO(body) as b:
                     message = json.load(b)
                     hparam_dict = message['hparam_dict']
                     metric_dict = message['metric_dict']
                     self.get_summary_writer(log_dir).add_hparams(hparam_dict, metric_dict, run_name=run_name)
-                    print(f'add_hparams, {log_dir=}, {hparam_dict=}, {metric_dict=}, {run_name=}')
+                    Logging.get().info(f'add_hparams, {log_dir=}, {hparam_dict=}, {metric_dict=}, {run_name=}')
             case 'flush':
                 sw = self.get_summary_writer(log_dir)
 
@@ -264,10 +367,10 @@ class RmqSummaryCollector(RmqSummaryBase):
                             tag = properties.headers[f'tag_{i}']
                             global_step = int(properties.headers[f'global_step_{i}'])
                             sw.add_scalar(tag, scalar_value, global_step)
-                            print(f'add_scalar (on flush), {log_dir=}, {tag=}, {scalar_value=}, {global_step=}')
+                            Logging.get().info(f'add_scalar (on flush), {log_dir=}, {tag=}, {scalar_value=}, {global_step=}')
                 
                 sw.flush()
-                print('flush')
+                Logging.get().info('flush')
             case _:
                 assert False, f'Unknown method="{logic_method}"'
         
@@ -277,15 +380,201 @@ class RmqSummaryCollector(RmqSummaryBase):
     def get_summary_writer(self, log_dir):
         from torch.utils.tensorboard import SummaryWriter
         log_dir = os.path.join(self.base_log_dir, log_dir.lstrip('/'))
-        print(f'Creating SummaryWriter for log_dir={log_dir} (base_log_dir={self.base_log_dir})')
+        Logging.get().info(f'Creating SummaryWriter for log_dir={log_dir} (base_log_dir={self.base_log_dir})')
         return SummaryWriter(log_dir=log_dir)
 
+class S3SummaryCollector:
+    def __init__(self,
+                 base_log_dir, 
+                 s3_endpoint_url, 
+                 s3_bucket_name, 
+                 nexus_url='http://nexus:8081', 
+                 nexus_auth=('bot', 'bot'), 
+                 maven_repo='model-registry'):
+        self.base_log_dir = base_log_dir
+        self.s3_bucket_name = s3_bucket_name
+        self.s3 = boto3.client('s3', endpoint_url=s3_endpoint_url)
+        self.nexus_url = nexus_url
+        self.nexus_auth = nexus_auth
+        self.maven_repo = maven_repo
+
+    def process_new_data(self):
+        response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name)
+        is_any_processing = False
+        
+        # S3 naturally returns keys sorted alphabetically (batch_000000.json, batch_000001.json, etc.)
+        for obj in response.get('Contents', []):
+            key = obj['Key']
+            Logging.get().trace(f'Processing {key=}')
+            key_parts = key.split('/')
+
+            if len(key_parts) < 4:
+                raise ValueError(f'Key "{key}" has invalid format')
+            
+            log_dir = '/'.join(key_parts[:2])
+            kind = key_parts[2]
+
+            match kind:
+                case 'metrics': 
+                    Logging.get().info(f'New metrics batch: {key=}')
+                    obj = self.s3.get_object(Bucket=self.s3_bucket_name, Key=key)
+                    batch = json.loads(obj['Body'].read().decode('utf-8'))
+                    self.process_metrics_batch(log_dir, batch)
+                case 'assets': 
+                    Logging.get().info(f'New asset: {key=}')
+                    obj = self.s3.get_object(Bucket=self.s3_bucket_name, Key=key)
+                    self.process_asset(obj['Body'].read(), obj['Metadata'])
+                case _: 
+                    raise ValueError(f'Key "{key}" has unsupported {kind=}')
+
+            self.s3.delete_object(Bucket=self.s3_bucket_name, Key=key)
+            Logging.get().trace(f'Processed and deleted {key=}')
+            is_any_processing = True
+
+        return is_any_processing
+
+    def process_metrics_batch(self, log_dir, batch):
+        is_dirty = False
+        
+        for batch_item in batch:
+            assert isinstance(batch_item, dict), type(batch_item)
+            global_step = batch_item.get('global_step', None)
+            global_step = lu.when(global_step, lambda: int(global_step), global_step) # all headers are strings
+            tag = batch_item.get('tag', None)
+            
+            match batch_item['method']:
+                case 'add_scalar':
+                    scalar_value = batch_item['scalar_value']
+                    self.get_summary_writer(log_dir).add_scalar(tag, scalar_value, global_step)
+                    Logging.get().info(f'add_scalar, {log_dir=}, {tag=}, {scalar_value=}, {global_step=}')
+                case 'add_text':
+                    text_string = batch_item['text_string']
+                    self.get_summary_writer(log_dir).add_text(tag, text_string, global_step)
+                    Logging.get().info(f'add_text, {log_dir=}, {tag=}, {text_string[:1000]=}, {global_step=}')
+                case 'add_figure':
+                    with io.BytesIO(base64.b64decode(batch_item['figure'])) as b:
+                        image_data = pickle.load(b)
+                        self.get_summary_writer(log_dir).add_image(tag, image_data, global_step)
+                        Logging.get().info(f'add_figure, {log_dir=}, {tag=}, {image_data.shape=}, {global_step=}')
+                case 'add_video_file':
+                    body = base64.b64decode(batch_item['video_file'])
+                    video_file_len = len(body)
+                    # Perform transcoding and upload to tensorboard UI. Very slow. In fact produces animated GIF from video file
+                    with io.BytesIO(body) as b:
+                        container = av.open(b)
+                        fps = float(container.streams.video[0].average_rate)
+                        fps = lu.when(fps > 60, 60, fps)
+                        frames = []
+                        
+                        for frame in container.decode(video=0):
+                            # Convert to RGB and then to a torch tensor
+                            img = frame.to_image().convert('RGB')
+                            frames.append(torch.from_numpy(np.array(img)))
+        
+                        video_tensor = torch.stack(frames) 
+                        # 3. Permute to PyTorch format: (N, T, C, H, W)
+                        # add Batch dim (N=1) and move Channels (C) to index 2
+                        video_tensor = video_tensor.unsqueeze(0).permute(0, 1, 4, 2, 3)
+                        self.get_summary_writer(log_dir).add_video(tag, video_tensor, global_step, fps)
+                        Logging.get().info(f'add_video_file, {log_dir=}, {tag=}, {video_tensor.shape=} ({video_tensor.dtype}) ({video_file_len} bytes), {global_step=}, {fps=}')
+                case 'add_file':
+                    body = base64.b64decode(batch_item['file'])
+                    file_len = len(body)
+                    full_log_dir = os.path.join(self.base_log_dir, log_dir.lstrip('/'))
+                    file_name = batch_item['file_name']
+                    
+                    with open(os.path.join(full_log_dir, file_name), 'wb') as f:
+                        f.write(body)
+    
+                    Logging.get().info(f'add_file, {log_dir=}, {file_name=} ({file_len} bytes)')
+                case 'add_hparams':
+                    hparam_dict = batch_item['hparam_dict']
+                    metric_dict = batch_item['metric_dict']
+                    run_name = batch_item['run_name']
+                    self.get_summary_writer(log_dir).add_hparams(hparam_dict, metric_dict, run_name=run_name)
+                    Logging.get().info(f'add_hparams, {log_dir=}, {hparam_dict=}, {metric_dict=}, {run_name=}')
+                case _:
+                    raise ValueError(f'Unknown method="{batch_item['method']}"')
+
+            is_dirty = True
+
+        if is_dirty:
+            self.get_summary_writer(log_dir).flush()
+
+    def process_asset(self, asset, metadata):
+        artifact_registry = ArtifactRegistry(
+            metadata['maven_group_id'], 
+            nexus_url=self.nexus_url, 
+            download_nexus_url=self.nexus_url, 
+            nexus_auth=self.nexus_auth, 
+            maven_repo=self.maven_repo
+        )
+        artifact_registry.attach_asset(
+            comp_name=metadata['comp_name'],
+            comp_version=metadata['comp_version'],
+            asset=io.BytesIO(asset),
+            asset_classifier=metadata['asset_classifier'],
+            asset_ext=metadata['asset_ext'],
+            replace=True,
+        )
+    
+    @lru_cache(maxsize=100)
+    def get_summary_writer(self, log_dir):
+        from torch.utils.tensorboard import SummaryWriter
+        log_dir = os.path.join(self.base_log_dir, log_dir.lstrip('/'))
+        Logging.get().info(f'Creating SummaryWriter for log_dir={log_dir} (base_log_dir={self.base_log_dir})')
+        return SummaryWriter(log_dir=log_dir)
+        
 if __name__ == "__main__":
     import argparse
+    
+    LOG = Logging.get()
+    LOG.app_name = 'metrics_collector'
+    LOG.enable('syslog', False)
+    LOG.enable('stdout', True)
+    
     parser = argparse.ArgumentParser()
-    parser.add_argument('--base_log_dir', type=str, default='/logdir')
-    parser.add_argument('--rmq_connection_url', type=str, default='amqp://guest:guest@rabbitmq:5672/%2F')
+    parser.add_argument('--base_log_dir', type=str, default='/logdir/focus')
+
+    rabbitmq_group = parser.add_argument_group('RabbitMQ Options')
+    rabbitmq_group.add_argument('--rmq_connection_url', type=str, default='')
+
+    s3_group = parser.add_argument_group('S3 Options')
+    s3_group.add_argument('--s3_endpoint_url', type=str, default='')
+    s3_group.add_argument('--s3_bucket_name', type=str, default='')
+    s3_group.add_argument('--poll_interval', type=int, default=10)
+
     args = parser.parse_args()
-    print(f'Running collector with args={args}')
-    collector = RmqSummaryCollector(args.base_log_dir, args.rmq_connection_url)
-    collector.run()
+
+    has_rmq = bool(args.rmq_connection_url)
+    has_s3 = bool(args.s3_endpoint_url or args.s3_bucket_name)
+
+    if has_rmq and has_s3:
+        parser.error('Cannot specify both RabbitMQ and S3 configurations')
+
+    if not has_rmq and not has_s3:
+        parser.error('You must specify either RabbitMQ configuration or S3 configuration')
+
+    if has_s3 and not (args.s3_endpoint_url and args.s3_bucket_name):
+        parser.error('When using S3, both --s3_endpoint_url and --s3_bucket_name are required')
+
+    if has_rmq:
+        LOG.info(f'Collecting metrics from RabbitMQ: {args}')
+        collector = RmqSummaryCollector(
+            args.base_log_dir, 
+            args.rmq_connection_url
+        )
+        collector.run()
+    elif has_s3:
+        LOG.info(f'Collecting metrics and assets from S3: {args}')
+        collector = S3SummaryCollector(
+            args.base_log_dir, 
+            s3_endpoint_url=args.s3_endpoint_url, 
+            s3_bucket_name=args.s3_bucket_name, 
+        )
+
+        while True:
+            if not collector.process_new_data():
+                Logging.get().info(f'Did not process any data, going to sleep for {args.poll_interval} seconds')
+                
+            time.sleep(args.poll_interval)

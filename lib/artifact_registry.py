@@ -4,6 +4,8 @@ import string
 import requests
 import time
 
+import boto3
+
 import lang_utils as lu
 from logging_utils import *
 
@@ -177,3 +179,44 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
             
         return list(filter(filter_func, assets))     
 
+class S3ArtifactRegistry:
+    def __init__(self, s3_endpoint_url, s3_bucket_name, maven_group_id):
+        self.maven_group_id = maven_group_id
+        self.s3_bucket_name = s3_bucket_name
+        self.s3 = boto3.client('s3', endpoint_url=s3_endpoint_url)
+
+    def attach_asset(self, comp_name, comp_version, asset, asset_ext='', asset_classifier='', replace=False):
+        metadata = dict(
+            maven_group_id=self.maven_group_id,
+            comp_name=comp_name,
+            comp_version=comp_version,
+            asset_ext=asset_ext,
+            asset_classifier=asset_classifier,
+        )
+        
+        if isinstance(asset, str):
+            metadata['asset_ext'] = os.path.splitext(asset)[1].lstrip('.')
+        else:
+            assert metadata['asset_ext'], 'asset_ext arg must be specified'
+            
+        key = f'{comp_name}/{comp_version}/assets/{self.maven_group_id}.{comp_name}:{comp_version}.[{asset_classifier}.{asset_ext}]'
+
+        if isinstance(asset, str):
+            with open(asset, 'rb') as asset_file:
+                self.s3.put_object(
+                    Bucket=self.s3_bucket_name,
+                    Key=key,
+                    Body=asset_file,
+                    Metadata=metadata,
+                )
+        elif isinstance(asset, io.IOBase):
+            asset.seek(0)
+            self.s3.put_object(
+                Bucket=self.s3_bucket_name,
+                Key=key,
+                Body=asset,
+                Metadata=metadata,
+            )
+        else:
+            assert False, f'Unsupported asset type={type(asset)}'
+        
