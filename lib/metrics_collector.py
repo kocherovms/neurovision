@@ -226,7 +226,8 @@ class S3SummaryWriter:
             batch_item = dict(
                 method='add_figure',
                 tag=tag,
-                figure=base64.b64encode(b.getvalue()).decode('utf-8'),
+                # figure=base64.b64encode(b.getvalue()).decode('utf-8'),
+                figure=b.getvalue(),
                 global_step=global_step,
             )
             
@@ -243,10 +244,14 @@ class S3SummaryWriter:
         
         if isinstance(video_file, io.IOBase):
             video_file.seek(0)
-            batch_item['video_file'] = base64.b64encode(video_file.read()).decode('utf-8')
+            # batch_item['video_file'] = base64.b64encode(video_file.read()).decode('utf-8')
+            batch_item['video_file'] = video_file.getvalue()
         else:
+            assert isinstance(video_file, str), type(video_file)
+            
             with open(video_file, 'rb') as f:
-                batch_item['video_file'] = base64.b64encode(f.read()).decode('utf-8')
+                # batch_item['video_file'] = base64.b64encode(f.read()).decode('utf-8')
+                batch_item['video_file'] = f.read()
 
         self.batch.append(batch_item)
 
@@ -257,17 +262,22 @@ class S3SummaryWriter:
             file_name=file_name,
         )
         
-        if isinstance(file, io.StringIO):
+        # if isinstance(file, io.StringIO):
+        #     file.seek(0)
+        #     batch_item['file'] = file.getvalue()
+        # elif isinstance(file, io.BytesIO):
+        #     file.seek(0)
+        #     # batch_item['file'] = base64.b64encode(file.read()).decode('utf-8')
+        #     batch_item['file'] = file.getvalue()
+        if isinstance(file, io.StringIO) or isinstance(file, io.BytesIO):
             file.seek(0)
             batch_item['file'] = file.getvalue()
-        elif isinstance(file, io.BytesIO):
-            file.seek(0)
-            batch_item['file'] = base64.b64encode(file.read()).decode('utf-8')
         else:
             assert isinstance(file, str), type(file)
             
             with open(file, 'rb') as f:
-                batch_item['file'] = base64.b64encode(f.read()).decode('utf-8')
+                # batch_item['file'] = base64.b64encode(f.read()).decode('utf-8')
+                batch_item['file'] = f.read()
 
         self.batch.append(batch_item)
 
@@ -284,13 +294,19 @@ class S3SummaryWriter:
         if not self.batch:
             return
 
-        key = f'{self.log_dir}/metrics/batch_{self.batch_counter:09d}.json'
-        self.s3.put_object(
-            Bucket=self.s3_bucket_name,
-            Key=key,
-            Body=json.dumps(self.batch),
-            ContentType='application/json'
-        )
+        key = f'{self.log_dir}/metrics/batch_{self.batch_counter:09d}.pkl'
+        with io.BytesIO() as b:
+            pickle.dump(self.batch, b)
+            b.seek(0)
+            self.s3.put_object(
+                Bucket=self.s3_bucket_name,
+                Key=key,
+                # Body=json.dumps(self.batch),
+                # Body=self.batch,
+                Body=b,
+                # ContentType='application/json'
+                ContentType='application/octet-stream'
+            )
         self.batch_counter += 1
         self.batch = []
 
@@ -429,8 +445,10 @@ class S3SummaryCollector:
                 case 'metrics': 
                     Logging.get().info(f'New metrics batch: {key=}')
                     obj = self.s3.get_object(Bucket=self.s3_bucket_name, Key=key)
-                    batch = json.loads(obj['Body'].read().decode('utf-8'))
-                    self.process_metrics_batch(log_dir, batch)
+
+                    with io.BytesIO(obj['Body'].read()) as b:
+                        batch = pickle.load(b)
+                        self.process_metrics_batch(log_dir, batch)
                 case 'assets': 
                     Logging.get().info(f'New asset: {key=}')
                     obj = self.s3.get_object(Bucket=self.s3_bucket_name, Key=key)
@@ -463,12 +481,14 @@ class S3SummaryCollector:
                     self.get_summary_writer(log_dir).add_text(tag, text_string, global_step)
                     Logging.get().info(f'add_text, {log_dir=}, {tag=}, {text_string[:1000]=}, {global_step=}')
                 case 'add_figure':
-                    with io.BytesIO(base64.b64decode(batch_item['figure'])) as b:
+                    # with io.BytesIO(base64.b64decode(batch_item['figure'])) as b:
+                    with io.BytesIO(batch_item['figure']) as b:
                         image_data = pickle.load(b)
                         self.get_summary_writer(log_dir).add_image(tag, image_data, global_step)
                         Logging.get().info(f'add_figure, {log_dir=}, {tag=}, {image_data.shape=}, {global_step=}')
                 case 'add_video_file':
-                    body = base64.b64decode(batch_item['video_file'])
+                    # body = base64.b64decode(batch_item['video_file'])
+                    body = batch_item['video_file']
                     video_file_len = len(body)
                     # Perform transcoding and upload to tensorboard UI. Very slow. In fact produces animated GIF from video file
                     with io.BytesIO(body) as b:
@@ -489,7 +509,8 @@ class S3SummaryCollector:
                         self.get_summary_writer(log_dir).add_video(tag, video_tensor, global_step, fps)
                         Logging.get().info(f'add_video_file, {log_dir=}, {tag=}, {video_tensor.shape=} ({video_tensor.dtype}) ({video_file_len} bytes), {global_step=}, {fps=}')
                 case 'add_file':
-                    body = base64.b64decode(batch_item['file'])
+                    # body = base64.b64decode(batch_item['file'])
+                    body = batch_item['file']
                     file_len = len(body)
                     full_log_dir = os.path.join(self.base_log_dir, log_dir.lstrip('/'))
                     file_name = batch_item['file_name']
