@@ -27,6 +27,9 @@ RMQ_EVENTS_EXCHANGE_NAME = 'events'
 RMQ_EVENTS_QUEUE_NAME = 'events'
 RMQ_DEFAULT_CONNECTION_URL = 'amqp://guest:guest@rabbitmq:5672/%2F'
 
+S3_DEFAULT_ENDPOINT_URL = 'https://s3.ru-7.storage.selcloud.ru:443'
+S3_DEFAULT_BUCKET_NAME = 'neurolab'
+
 def _figure_to_image(figure, close):
     canvas = plt_backend_agg.FigureCanvasAgg(figure)
     canvas.draw()
@@ -187,7 +190,7 @@ class RmqSummaryWriter(RmqSummaryBase):
         )
 
 class S3SummaryWriter:
-    def __init__(self, log_dir, s3_endpoint_url, s3_bucket_name):
+    def __init__(self, log_dir, s3_endpoint_url=S3_DEFAULT_ENDPOINT_URL, s3_bucket_name=S3_DEFAULT_BUCKET_NAME):
         self.log_dir = log_dir
         self.s3_bucket_name = s3_bucket_name
         self.s3 = boto3.client('s3', endpoint_url=s3_endpoint_url)

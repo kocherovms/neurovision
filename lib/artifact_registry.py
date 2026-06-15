@@ -180,7 +180,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
         return list(filter(filter_func, assets))     
 
 class S3ArtifactRegistry:
-    def __init__(self, s3_endpoint_url, s3_bucket_name, maven_group_id):
+    def __init__(self, maven_group_id, s3_endpoint_url='https://s3.ru-7.storage.selcloud.ru:443', s3_bucket_name='neurolab'):
         self.maven_group_id = maven_group_id
         self.s3_bucket_name = s3_bucket_name
         self.s3 = boto3.client('s3', endpoint_url=s3_endpoint_url)
