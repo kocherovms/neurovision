@@ -8,8 +8,9 @@ RUN pip install optuna
 RUN pip install pika
 RUN pip install gymnasium 
 RUN pip install moviepy
-RUN pip install ale_py==0.12.0+neurolab --index-url=http://nexus:8081/repository/neurolab-pypi/simple --trusted-host=nexus --no-cache-dir
 RUN pip install av
 RUN pip install papermill
 RUN pip install scipy
+RUN pip install boto3
+RUN pip install ale_py==0.12.0+neurolab --index-url=http://nexus:8081/repository/neurolab-pypi/simple --trusted-host=nexus --no-cache-dir
 CMD ["/bin/bash"]
