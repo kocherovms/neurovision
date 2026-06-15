@@ -198,6 +198,9 @@ class S3SummaryWriter:
         self.batch_counter = 0
 
     def add_scalar(self, tag, scalar_value, global_step):
+        if isinstance(scalar_value, torch.Tensor) or isinstance(scalar_value, np.ndarray):
+            scalar_value = scalar_value.item()
+            
         batch_item = dict(
             method='add_scalar',
             tag=tag,
@@ -569,6 +572,7 @@ if __name__ == "__main__":
         )
         collector.run()
     elif has_s3:
+        from botocore.exceptions import ConnectionError
         LOG.info(f'Collecting metrics and assets from S3: {args}')
         collector = S3SummaryCollector(
             args.base_log_dir, 
@@ -577,7 +581,10 @@ if __name__ == "__main__":
         )
 
         while True:
-            if not collector.process_new_data():
-                Logging.get().info(f'Did not process any data, going to sleep for {args.poll_interval} seconds')
+            try:
+                if not collector.process_new_data():
+                    Logging.get().info(f'Did not process any data, going to sleep for {args.poll_interval} seconds')
+            except ConnectionError as e:
+                Logging.get().error(f'Failed to query new data from S3: {e}')
                 
             time.sleep(args.poll_interval)
