@@ -257,10 +257,15 @@ class S3SummaryWriter:
             file_name=file_name,
         )
         
-        if isinstance(file, io.IOBase):
+        if isinstance(file, io.StringIO):
+            file.seek(0)
+            batch_item['file'] = file.getvalue()
+        elif isinstance(file, io.BytesIO):
             file.seek(0)
             batch_item['file'] = base64.b64encode(file.read()).decode('utf-8')
         else:
+            assert isinstance(file, str), type(file)
+            
             with open(file, 'rb') as f:
                 batch_item['file'] = base64.b64encode(f.read()).decode('utf-8')
 
