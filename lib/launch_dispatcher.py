@@ -118,7 +118,7 @@ class LaunchDispatcher:
             runner_name = os.path.basename(os.path.dirname(key))
             assert len(runner_name) > 0
 
-            if not runner_name is self.runners:
+            if not runner_name in self.runners:
                 # New runner
                 eol_time = heartbeat_time + self.eol_duration
 
