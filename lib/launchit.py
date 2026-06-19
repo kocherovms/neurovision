@@ -3,23 +3,27 @@ import sys
 import json
 import re
 import string
-from collections import namedtuple
+from collections import namedtuple, defaultdict
+from dataclasses import dataclass
 from enum import IntEnum, auto 
 
+import lang_utils as lu
 from logging_utils import *
 
 class Command(IntEnum):
     COLLECT = auto()
-    COLLECT_1 = auto()
-    COLLECT_2 = auto()
-    COLLECT_3 = auto()
     COLLECTED = auto()
     DISABLE = auto()
-    DISABLE_1 = auto()
-    DISABLE_2 = auto()
-    DISABLE_3 = auto()
+    STOP = auto()
 
-ExecGraphEntry = namedtuple('ExecGraphEntry', 'command cell_ind source_line_ind is_oneliner stop_source_line_ind')
+@dataclass(order=True, slots=True)
+class ExecGraphEntry:
+    command: object = None
+    cell_ind: int = None
+    source_line_ind: int = None
+    is_oneliner: bool = None
+    stop_source_line_ind: int = None
+    index: str = None
 
 def launchit(fname, launch_serial=0, expandvars={}, make_py_file=False, dir_name='', max_serials_count=1_000, collect_inds=None, disable_inds=None):
     fname_dir = os.path.dirname(fname) if not dir_name else dir_name
@@ -42,9 +46,10 @@ def launchit(fname, launch_serial=0, expandvars={}, make_py_file=False, dir_name
     with open(fname, 'r') as f:
         nb = json.load(f)
         exec_graph = []
-        collected_source_lines = []
+        collected_source_lines = defaultdict(list) # collect index -> source lines
     
         for cell_ind, cell in enumerate(nb['cells']):
+            
             for source_line_ind, source_line in enumerate(cell['source']):
                 source_line = source_line.strip()
                 m = re.match(r'^(.*)#\s*@launchit\.(\w+)\s*$', source_line)
@@ -52,31 +57,28 @@ def launchit(fname, launch_serial=0, expandvars={}, make_py_file=False, dir_name
                 if m:
                     Logging.trace(f'Cell {cell_ind}, launchit stanza: "{source_line}"')
                     before = m.group(1)
-                    command = m.group(2)
-                    ege = ExecGraphEntry(command=None, cell_ind=cell_ind, source_line_ind=source_line_ind, is_oneliner=re.match(r'[^\s]+', before), stop_source_line_ind=-1)
-    
-                    match command:
-                        case 'disable':
-                            ege = ege._replace(command=Command.DISABLE)
-                        case 'disable_1':
-                            ege = ege._replace(command=Command.DISABLE_1)
-                        case 'disable_2':
-                            ege = ege._replace(command=Command.DISABLE_2)
-                        case 'disable_3':
-                            ege = ege._replace(command=Command.DISABLE_3)
-                        case 'collect':
-                            ege = ege._replace(command=Command.COLLECT)
-                        case 'collect_1':
-                            ege = ege._replace(command=Command.COLLECT_1)
-                        case 'collect_2':
-                            ege = ege._replace(command=Command.COLLECT_2)
-                        case 'collect_3':
-                            ege = ege._replace(command=Command.COLLECT_3)
-                        case 'collected':
+                    command_with_index = m.group(2)
+                    m2 = re.match(r'^(collected|collect|disable|stop)(_(\w+))?$', command_with_index)
+
+                    if not m2:
+                        Logging.warn(f'WARNING! Cell {cell_ind} contains unrecognized launchit command: "{command_with_index}"')
+                    else:
+                        command = m2.group(1)
+                        index = m2.group(3)
+                        ege = ExecGraphEntry(
+                            command=Command[command.upper()], 
+                            cell_ind=cell_ind, 
+                            source_line_ind=source_line_ind, 
+                            is_oneliner=re.match(r'[^\s]+', before), 
+                            stop_source_line_ind=-1,
+                            index=index,
+                        )
+
+                        if ege.command == Command.COLLECTED:
                             assert not ege.is_oneliner, '@launchit.collected cannot be oneliner'
-                            ege = ege._replace(command=Command.COLLECTED)
-                        case 'stop':
+                        elif ege.command == Command.STOP:
                             assert not ege.is_oneliner, '@launchit.stop cannot be oneliner'
+                            assert index is None, f'@launchit.stop does not support indexing, {command_with_index=}'
                             # look behind and patch stop_source_line_ind
                             for lb_ege_ind in range(len(exec_graph) - 1, -1, -1):
                                 lb_ege = exec_graph[lb_ege_ind]
@@ -84,69 +86,81 @@ def launchit(fname, launch_serial=0, expandvars={}, make_py_file=False, dir_name
                                 if lb_ege.cell_ind != cell_ind:
                                     raise Exception(f'Cell {cell_ind}, line {source_line_ind}, @launchit.stop has no preceeding command')
                                 elif lb_ege.stop_source_line_ind == -1:
-                                    exec_graph[lb_ege_ind] = lb_ege._replace(stop_source_line_ind=source_line_ind)
+                                    exec_graph[lb_ege_ind].stop_source_line_ind = source_line_ind
                                     Logging.trace(f'Cell {cell_ind}, command {lb_ege.command.name} at line {lb_ege.source_line_ind} will stop at line {source_line_ind}')
                                     break
-                        case _:
-                            Logging.warn(f'WARNING! Cell {cell_ind} contains unrecognized launchit command: "{command}"')
-    
-                    if not ege.command is None:
-                        exec_graph.append(ege)
-    
+
+                        if ege.command != Command.STOP:
+                            exec_graph.append(ege)
+
         for ege in sorted(exec_graph):
             cell = nb['cells'][ege.cell_ind]
             stop_source_line_ind = len(cell['source']) if ege.stop_source_line_ind == -1 else ege.stop_source_line_ind
             
             match ege.command:
-                case Command.COLLECT | Command.COLLECT_1 | Command.COLLECT_2 | Command.COLLECT_3:
-                    do_collect = collect_inds is None
+                case Command.COLLECT:
+                    do_collect = collect_inds is None # we are asked to grab everything
 
                     if not do_collect:
-                        do_collect = ege.command == Command.COLLECT
+                        do_collect = ege.index is None # wildcard collect instruction
 
                     if not do_collect:
-                        collect_ind = {Command.COLLECT_1: 1, Command.COLLECT_2: 2, Command.COLLECT_3: 3}[ege.command]
-                        do_collect = collect_ind in collect_inds
+                        assert ege.index is not None
+                        do_collect = ege.index in collect_inds or lu.from_str(int, ege.index, ege.index) in collect_inds # old clients expect just integer indices
 
                     if not do_collect:
                         if ege.is_oneliner:
-                            Logging.trace(f'Cell {ege.cell_ind}, skip collecting source line {ege.source_line_ind}')
+                            Logging.trace(f'Cell {ege.cell_ind}, skip collecting source line {ege.source_line_ind}, index={ege.index}')
                         else:
                             assert ege.source_line_ind + 1 < stop_source_line_ind
-                            Logging.trace(f'Cell {ege.cell_ind}, skip collecting source lines from {ege.source_line_ind + 1} to {stop_source_line_ind}')
+                            Logging.trace(f'Cell {ege.cell_ind}, skip collecting source lines from {ege.source_line_ind + 1} to {stop_source_line_ind}, index={ege.index}')
                     else:
                         if ege.is_oneliner:
-                            Logging.trace(f'Cell {ege.cell_ind}, collecting source line {ege.source_line_ind}')
+                            Logging.trace(f'Cell {ege.cell_ind}, collecting source line {ege.source_line_ind}, index={ege.index}')
                             source_line = cell['source'][ege.source_line_ind]
-                            collected_source_lines.append(source_line)
+                            collected_source_lines[ege.index].append(source_line)
                         else:
                             assert ege.source_line_ind + 1 < stop_source_line_ind
-                            Logging.trace(f'Cell {ege.cell_ind}, collecting source lines from {ege.source_line_ind + 1} to {stop_source_line_ind}')
+                            Logging.trace(f'Cell {ege.cell_ind}, collecting source lines from {ege.source_line_ind + 1} to {stop_source_line_ind}, index={ege.index}')
         
                             if collected_source_lines:
-                                collected_source_lines.append('\n')
+                                collected_source_lines[ege.index].append('\n')
             
                             for source_line_ind in range(ege.source_line_ind + 1, stop_source_line_ind):
                                 source_line = cell['source'][source_line_ind]
-                                collected_source_lines.append(source_line)
+                                collected_source_lines[ege.index].append(source_line)
+                
                 case Command.COLLECTED:
-                    Logging.trace(f'Cell {ege.cell_ind}, putting {len(collected_source_lines)} collected source lines to {ege.source_line_ind}')
+                    my_collected_source_lines = collected_source_lines.get(ege.index, [])
+                    my_collected_source_lines.append('')
+                    
+                    Logging.trace(f'Cell {ege.cell_ind} (len={len(cell['source'])}), ' + 
+                                  f'putting {len(my_collected_source_lines)} collected source lines to {ege.source_line_ind}, index={ege.index}')
     
-                    for ind, source_line in enumerate(collected_source_lines):
+                    for ind, source_line in enumerate(my_collected_source_lines):
                         if ind > 0:
                             cell['source'].insert(ege.source_line_ind + ind, source_line)
                         else:
                             cell['source'][ege.source_line_ind + ind] = source_line
-                case Command.DISABLE | Command.DISABLE_1 | Command.DISABLE_2 | Command.DISABLE_3:
+
+                    successors = filter(
+                        lambda x: x.command == Command.COLLECTED and x.cell_ind == ege.cell_ind and x.source_line_ind > ege.source_line_ind,
+                        exec_graph,
+                    )
+                    
+                    for successor in successors:
+                        successor.source_line_ind += max(len(my_collected_source_lines) - 1, 0) # -1 since collected instruction is replaced with first line
+            
+                case Command.DISABLE:
                     def disable_source_line(s):
-                        do_disable = disable_inds is None
+                        do_disable = disable_inds is None # we asked to disable everything
 
                         if not do_disable:
-                            do_disable = ege.command == Command.DISABLE
+                            do_disable = ege.index is None # wildcard disable instruction
 
                         if not do_disable:
-                            disable_ind = {Command.DISABLE_1: 1, Command.DISABLE_2: 2, Command.DISABLE_3: 3}[ege.command]
-                            do_disable = disable_ind in disable_inds
+                            assert ege.index is not None
+                            do_disable = ege.index in disable_inds or lu.from_str(int, ege.index, ege.index) in disable_inds # old clients expect just integer indices
 
                         if not do_disable:
                             return s
@@ -157,11 +171,11 @@ def launchit(fname, launch_serial=0, expandvars={}, make_py_file=False, dir_name
                             return '# ' + s
                     
                     if ege.is_oneliner:
-                        Logging.trace(f'Cell {ege.cell_ind}, disabling source line {ege.source_line_ind}')
+                        Logging.trace(f'Cell {ege.cell_ind}, disabling source line {ege.source_line_ind}, index={ege.index}')
                         cell['source'][ege.source_line_ind] = disable_source_line(cell['source'][ege.source_line_ind])
                     else:
                         assert ege.source_line_ind + 1 < stop_source_line_ind
-                        Logging.trace(f'Cell {ege.cell_ind}, disabling source lines from {ege.source_line_ind + 1} to {stop_source_line_ind}')
+                        Logging.trace(f'Cell {ege.cell_ind}, disabling source lines from {ege.source_line_ind + 1} to {stop_source_line_ind}, index={ege.index}')
     
                         for source_line_ind in range(ege.source_line_ind + 1, stop_source_line_ind):
                             cell['source'][source_line_ind] = disable_source_line(cell['source'][source_line_ind])
