@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import datetime
 import logging
 import logging.handlers
 from dataclasses import dataclass
@@ -48,7 +49,7 @@ class Logging:
     @staticmethod
     def trace(s, with_duration=True, when=True):
         Logging.get()(s, with_duration, when, log_level=logging.DEBUG - 1)
-    
+
     def __init__(self):
         syslog_logger = logging.getLogger('kmslog_syslog')
         
@@ -63,9 +64,16 @@ class Logging:
             stream_handler = logging.StreamHandler(sys.stdout)
             stdout_logger.addHandler(stream_handler)
 
+        verbose_stdout_logger = logging.getLogger('kmslog_verbose_stdout')
+        
+        if not verbose_stdout_logger.hasHandlers():
+            stream_handler = logging.StreamHandler(sys.stdout)
+            verbose_stdout_logger.addHandler(stream_handler)
+
         self.sinks = dict(
             syslog=Logging.Sink(syslog_logger, self.prepare_syslog_message, True),
             stdout=Logging.Sink(stdout_logger, self.prepare_stdout_message, True),
+            verbose_stdout=Logging.Sink(verbose_stdout_logger, self.prepare_verbose_stdout_message, False),
         )
 
         self.set_log_level('all', logging.DEBUG)
@@ -130,6 +138,18 @@ class Logging:
 
     def prepare_stdout_message(self, s, t, with_duration):
         return s
+
+    def prepare_verbose_stdout_message(self, s, t, with_duration):
+        msg = datetime.datetime.now().strftime('%Y.%m.%d-%H:%M:%S.%f')
+        msg += ' ' + self.prefix
+        msg += ' ' if self.prefix else ''
+        
+        if with_duration:
+            duration = max(0, t - self.last_log_time)
+            msg += f'{duration:>9.3f} >> '
+            
+        msg += s
+        return msg
 
     def push_prefix(self, stanza_name, stanza_value):
         if stanza_name in self.prefix_stanzas:

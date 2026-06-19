@@ -29,6 +29,7 @@ RMQ_DEFAULT_CONNECTION_URL = 'amqp://guest:guest@rabbitmq:5672/%2F'
 
 S3_DEFAULT_ENDPOINT_URL = 'https://s3.ru-7.storage.selcloud.ru:443'
 S3_DEFAULT_BUCKET_NAME = 'neurolab'
+S3_DEFAULT_KEY_PREFIX = 'launches'
 
 def _figure_to_image(figure, close):
     canvas = plt_backend_agg.FigureCanvasAgg(figure)
@@ -190,10 +191,11 @@ class RmqSummaryWriter(RmqSummaryBase):
         )
 
 class S3SummaryWriter:
-    def __init__(self, log_dir, s3_endpoint_url=S3_DEFAULT_ENDPOINT_URL, s3_bucket_name=S3_DEFAULT_BUCKET_NAME):
+    def __init__(self, log_dir, s3_endpoint_url=S3_DEFAULT_ENDPOINT_URL, s3_bucket_name=S3_DEFAULT_BUCKET_NAME, key_prefix=S3_DEFAULT_KEY_PREFIX):
         self.log_dir = log_dir
         self.s3_bucket_name = s3_bucket_name
         self.s3 = boto3.client('s3', endpoint_url=s3_endpoint_url)
+        self.key_prefix = key_prefix
         self.batch = []
         self.batch_counter = 0
 
@@ -286,7 +288,7 @@ class S3SummaryWriter:
         if not self.batch:
             return
 
-        key = f'{self.log_dir}/metrics/batch_{self.batch_counter:09d}.pkl'
+        key = f'{self.key_prefix}/{self.log_dir}/metrics/batch_{self.batch_counter:09d}.pkl'
         with io.BytesIO() as b:
             pickle.dump(self.batch, b)
             b.seek(0)
@@ -404,18 +406,20 @@ class S3SummaryCollector:
                  base_log_dir, 
                  s3_endpoint_url, 
                  s3_bucket_name, 
+                 key_prefix,
                  nexus_url='http://nexus:8081', 
                  nexus_auth=('bot', 'bot'), 
                  maven_repo='model-registry'):
         self.base_log_dir = base_log_dir
         self.s3_bucket_name = s3_bucket_name
         self.s3 = boto3.client('s3', endpoint_url=s3_endpoint_url)
+        self.key_prefix = key_prefix
         self.nexus_url = nexus_url
         self.nexus_auth = nexus_auth
         self.maven_repo = maven_repo
 
     def process_new_data(self):
-        response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name)
+        response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name, Prefix=self.key_prefix)
         is_any_processing = False
         
         # S3 naturally returns keys sorted alphabetically (batch_000000.json, batch_000001.json, etc.)
@@ -472,13 +476,11 @@ class S3SummaryCollector:
                 case 'add_figure':
                     body = batch_item['figure']
                     assert isinstance(body, bytes)
-                    # with io.BytesIO(base64.b64decode(batch_item['figure'])) as b:
                     with io.BytesIO(body) as b:
                         image_data = pickle.load(b)
                         self.get_summary_writer(log_dir).add_image(tag, image_data, global_step)
                         Logging.get().info(f'add_figure, {log_dir=}, {tag=}, {image_data.shape=}, {global_step=}')
                 case 'add_video_file':
-                    # body = base64.b64decode(batch_item['video_file'])
                     body = batch_item['video_file']
                     assert isinstance(body, bytes)
                     video_file_len = len(body)
@@ -501,7 +503,6 @@ class S3SummaryCollector:
                         self.get_summary_writer(log_dir).add_video(tag, video_tensor, global_step, fps)
                         Logging.get().info(f'add_video_file, {log_dir=}, {tag=}, {video_tensor.shape=} ({video_tensor.dtype}) ({video_file_len} bytes), {global_step=}, {fps=}')
                 case 'add_file':
-                    # body = base64.b64decode(batch_item['file'])
                     body = batch_item['file']
                     assert isinstance(body, bytes)
                     file_len = len(body)
@@ -556,7 +557,8 @@ if __name__ == "__main__":
     LOG = Logging.get()
     LOG.app_name = 'metrics_collector'
     LOG.enable('syslog', False)
-    LOG.enable('stdout', True)
+    LOG.enable('stdout', False)
+    LOG.enable('verbose_stdout', True)
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--base_log_dir', type=str, default='/logdir/focus')
@@ -567,6 +569,7 @@ if __name__ == "__main__":
     s3_group = parser.add_argument_group('S3 Options')
     s3_group.add_argument('--s3_endpoint_url', type=str, default='')
     s3_group.add_argument('--s3_bucket_name', type=str, default='')
+    s3_group.add_argument('--key_prefix', type=str, default=S3_DEFAULT_KEY_PREFIX)
     s3_group.add_argument('--poll_interval', type=int, default=10)
 
     args = parser.parse_args()
@@ -597,6 +600,7 @@ if __name__ == "__main__":
             args.base_log_dir, 
             s3_endpoint_url=args.s3_endpoint_url, 
             s3_bucket_name=args.s3_bucket_name, 
+            key_prefix=args.key_prefix,
         )
 
         while True:
