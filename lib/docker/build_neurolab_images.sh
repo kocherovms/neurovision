@@ -8,5 +8,5 @@ docker build -f neurolab_deps.Dockerfile   -t cr.selcloud.ru/neurolab/neurolab_d
 
 docker build -f neurolab_source.Dockerfile -t cr.selcloud.ru/neurolab/neurolab_source:latest -t neurolab_source:latest  .
 
-docker push cr.selcloud.ru/neurolab/neurolab_deps:latest
-docker push cr.selcloud.ru/neurolab/neurolab_source:latest
+[[ -f .docker_push ]] && docker push cr.selcloud.ru/neurolab/neurolab_deps:latest
+[[ -f .docker_push ]] && docker push cr.selcloud.ru/neurolab/neurolab_source:latest
