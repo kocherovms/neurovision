@@ -9,6 +9,7 @@ from enum import IntEnum, auto
 import dataclasses
 from dataclasses import dataclass
 import logging
+import threading
 
 import boto3
 import docker
@@ -25,7 +26,18 @@ parser.add_argument('--s3_bucket_name', type=str, default='neurolab')
 parser.add_argument('--key_prefix', type=str, default='runners')
 parser.add_argument('--heartbeat_interval', type=int, default=10)
 parser.add_argument('--log_level', type=str, default='info')
+parser.add_argument('-e', action='append', default=[])
 args = parser.parse_args()
+env_vars = {}
+
+for env_var in args.e:
+    pos = env_var.find('=')
+    assert pos > -1, env_var
+    env_key = env_var[:pos]
+    env_val = env_var[pos+1:]
+    assert env_key, env_var
+    assert env_val, env_var
+    env_vars[env_key] = env_val
 
 LOG = Logging.get()
 LOG.enable('syslog', False)
@@ -33,20 +45,58 @@ LOG.enable('stdout', False)
 LOG.enable('verbose_stdout', True)
 LOG.set_log_level('all', logging.getLevelName(args.log_level.upper()))
 
-s3_session = boto3.Session()
-s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url)
 runner_name = f'{socket.gethostname()}_{int(time.time())}'
-LOG.info(f'Runner "{runner_name}" ready')
+LOG(f'Runner "{runner_name}" starting')
+
+docker_client = docker.from_env()
+
+def check_gpu_presence():
+    test_request = docker.types.DeviceRequest(
+        count=1,  # Requesting just 1 for a lightweight test
+        capabilities=[['gpu']], 
+        driver='nvidia'
+    )
+    try:
+        # Launch a lightweight, instant-exit test container
+        docker_client.containers.run(
+            image='alpine:latest',
+            command='true',
+            device_requests=[test_request],
+            remove=True # Auto-cleanup
+        )
+        return True
+    except APIError as e:
+        error_msg = str(e).lower()
+        # Detect missing hardware or broken driver bindings
+        if 'capabilities' in error_msg or 'gpu' in error_msg:
+            return False
+            
+        raise e
+
+is_gpu_present = check_gpu_presence()
+LOG(f'{is_gpu_present=}')
+
+s3_session = boto3.Session()
+s3_credentials = s3_session.get_credentials()
+env_vars['AWS_ACCESS_KEY_ID'] = s3_credentials.access_key
+env_vars['AWS_SECRET_ACCESS_KEY'] = s3_credentials.secret_key
+env_vars['AWS_DEFAULT_REGION'] = s3_session.region_name
+
+s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url)
+
 
 class State(IntEnum):
     IDLE = auto()
-    BUSY = auto()
+    IMAGE_PULL = auto()
+    RUNNING = auto()
 
 state = State.IDLE
 launch_id = None
 launch = None
+pull_result = None
+pull_finished_event = None
+pull_thread = None
 container = None
-docker_client = docker.from_env()
 
 @dataclass(slots=True)
 class ResultMetadata:
@@ -61,6 +111,25 @@ class ResultMetadata:
             error_code=lu.when(self.error_code, lambda: str(self.error_code),  ''),
         )
 
+# To be called in a separate thread (to avoid block if main process)
+def pull_image(image_name, pull_result, finish_event):
+    try:
+        # stream=True returns a generator yielding status updates
+        output_stream = docker_client.api.pull(image_name, stream=True, decode=True)
+    
+        for line in output_stream:
+            LOG.debug(f'Pulling: {json.dumps(line)}')
+            
+        pull_result.is_ok = True
+    except Exception as e:
+        pull_result.is_ok = False
+        pull_result.error_message = f'Failed to pull launch image "{image_name}": {str(e)}'
+        LOG.error(pull_result.error_message)
+    finally:
+        finish_event.set()
+
+LOG(f'Runner ready')
+        
 while True:
     heartbeat_key = f'{args.key_prefix}/heartbeats/{runner_name}/{int(time.time())}{lu.when(launch_id, lambda: '_' + launch_id, '')}'
     s3.put_object(
@@ -68,9 +137,16 @@ while True:
         Bucket=args.s3_bucket_name,
         Body=b'',
     )
-    LOG.debug(f'Heartbeat sent "{heartbeat_key}"')
+    LOG.debug(f'Heartbeat sent "{heartbeat_key}", state={state.name}')
 
     if state == State.IDLE:
+        assert launch_id is None
+        assert launch is None
+        assert pull_result is None
+        assert pull_finished_event is None
+        assert pull_thread is None
+        assert container is None
+        
         response = s3.list_objects_v2(Bucket=args.s3_bucket_name, Prefix=f'{args.key_prefix}/pending_launches/{runner_name}')
         
         for obj in response.get('Contents', []):
@@ -84,49 +160,82 @@ while True:
                 launch = json.load(b)
     
             s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
-            
-            try:
-                s3_credentials = s3_session.get_credentials()
-                # --gpus=all 
-                container = docker_client.containers.run(
-                    image=launch['launch_image'],
-                    environment=dict(
-                        AWS_ACCESS_KEY_ID=s3_credentials.access_key,
-                        AWS_SECRET_ACCESS_KEY=s3_credentials.secret_key,
-                        AWS_DEFAULT_REGION=s3_session.region_name,
-                    ),
-                    shm_size=lu.coalesce(launch.get('shm_size'), '16G'),
-                    volumes=['/dev/log:/dev/log'],
-                    device_requests=[
-                        DeviceRequest(
-                            count=-1,                             # -1 means "all" GPUs
-                            capabilities=[["gpu"]]               # Requests the GPU capability
-                        )
-                    ],
-                    detach=True,
-                    remove=False,  # Keep container after exit so we can fetch its files/status
-                )
-                LOG(f'Container "{launch['launch_image']}" started for "{launch_id}"')
-                state = State.BUSY
-            except DockerException as e:
-                LOG.error(f'Failed to start container "{launch['launch_image']}" for "{launch_id}": {e}')
-                s3.put_object(
-                    Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
-                    Bucket=args.s3_bucket_name, 
-                    Body=b'',
-                    ContentType='application/octet-stream',
-                    Metadata=ResultMetadata(is_ok=False, error_message=f'Failed to start container: {str(e)}', error_code=1).asdict(),
-                )
-                launch_id = None
-                launch = None
-                container = None
-                state = State.IDLE
-            
+
+            pull_result = ResultMetadata(is_ok=False)
+            pull_finished_event = threading.Event()
+            pull_thread = threading.Thread(
+                target=pull_image, 
+                args=(launch['launch_image'], pull_result, pull_finished_event),
+                daemon=True # Daemon ensures the thread dies if the main script kills itself
+            )
+            pull_thread.start()
+            LOG(f'Started pull of launch image "{launch['launch_image']}"')
             break
-            
-    elif state == State.BUSY:
+
+    elif state == State.IMAGE_PULL:
         assert launch_id is not None
         assert launch is not None
+        assert pull_result is not None
+        assert pull_finished_event is not None
+        assert pull_thread is not None
+        assert container is None
+
+        if pull_finished_event.is_set():
+            try:
+                if pull_result.is_ok == False:
+                    s3.put_object(
+                        Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
+                        Bucket=args.s3_bucket_name, 
+                        Body=b'',
+                        ContentType='application/octet-stream',
+                        Metadata=ResultMetadata(is_ok=False, error_message=f'Failed to pull launch image: {pull_result.error_message}', error_code=1).asdict(),
+                    )
+                    launch_id = None
+                    launch = None
+                    container = None
+                    state = State.IDLE
+                else:
+                    try:
+                        device_requests = []
+
+                        if is_gpu_present:
+                            device_requests.append(DeviceRequest(count=-1, capabilities=[["gpu"]]))
+                            
+                        container = docker_client.containers.run(
+                            image=launch['launch_image'],
+                            environment=env_vars,
+                            shm_size=lu.coalesce(launch.get('shm_size'), '16G'),
+                            volumes=['/dev/log:/dev/log'], # for logging
+                            device_requests=device_requests,
+                            detach=True,
+                            remove=False,  # Keep container after exit so we can fetch its files/status
+                        )
+                        LOG(f'Container "{launch['launch_image']}" started for "{launch_id}"')
+                        state = State.RUNNING
+                    except DockerException as e:
+                        LOG.error(f'Failed to start container "{launch['launch_image']}" for "{launch_id}": {str(e)}')
+                        s3.put_object(
+                            Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
+                            Bucket=args.s3_bucket_name, 
+                            Body=b'',
+                            ContentType='application/octet-stream',
+                            Metadata=ResultMetadata(is_ok=False, error_message=f'Failed to start container: {str(e)}', error_code=1).asdict(),
+                        )
+                        launch_id = None
+                        launch = None
+                        container = None
+                        state = State.IDLE
+            finally:
+                pull_result = None
+                pull_finished_event = None
+                pull_thread = None
+            
+    elif state == State.RUNNING:
+        assert launch_id is not None
+        assert launch is not None
+        assert pull_result is None
+        assert pull_finished_event is None
+        assert pull_thread is None
         assert container is not None
 
         container.reload()
@@ -137,7 +246,7 @@ while True:
             LOG.debug(f'{exit_attrs=}')
             exit_code = exit_attrs['ExitCode']
             
-            LOG(f'Container for "{launch_id}" finished (status="{container.status}"), exit code={exit_code}')
+            LOG(f'Container for "{launch_id}" finished: status="{container.status}", exit code={exit_code}')
             response = b''
 
             if exit_code == 0:
