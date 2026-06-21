@@ -21,6 +21,7 @@ import lang_utils as lu
 from logging_utils import *
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--name_prefix', type=str, default=None)
 parser.add_argument('--s3_endpoint_url', type=str, default='https://s3.ru-7.storage.selcloud.ru:443')
 parser.add_argument('--s3_bucket_name', type=str, default='neurolab')
 parser.add_argument('--key_prefix', type=str, default='runners')
@@ -45,7 +46,8 @@ LOG.enable('stdout', False)
 LOG.enable('verbose_stdout', True)
 LOG.set_log_level('all', logging.getLevelName(args.log_level.upper()))
 
-runner_name = f'{socket.gethostname()}_{int(time.time())}'
+name_prefix = lu.coalesce(args.name_prefix, socket.gethostname())
+runner_name = f'{name_prefix}_{time.time():.3f}'
 LOG(f'Runner "{runner_name}" starting')
 
 docker_client = docker.from_env()
@@ -66,6 +68,7 @@ def check_gpu_presence():
         )
         return True
     except APIError as e:
+        LOG.error(f'Failed to launch "alpine:latest" with GPU capabilities: {str(e)}')
         error_msg = str(e).lower()
         # Detect missing hardware or broken driver bindings
         if 'capabilities' in error_msg or 'gpu' in error_msg:
@@ -131,6 +134,7 @@ def pull_image(image_name, pull_result, finish_event):
 LOG(f'Runner ready')
         
 while True:
+    sleep_interval = args.heartbeat_interval
     heartbeat_key = f'{args.key_prefix}/heartbeats/{runner_name}/{int(time.time())}{lu.when(launch_id, lambda: '_' + launch_id, '')}'
     s3.put_object(
         Key=heartbeat_key,
@@ -169,6 +173,8 @@ while True:
                 daemon=True # Daemon ensures the thread dies if the main script kills itself
             )
             pull_thread.start()
+            state = State.IMAGE_PULL
+            sleep_interval = 0
             LOG(f'Started pull of launch image "{launch['launch_image']}"')
             break
 
@@ -194,6 +200,7 @@ while True:
                     launch = None
                     container = None
                     state = State.IDLE
+                    sleep_interval = 0
                 else:
                     try:
                         device_requests = []
@@ -210,21 +217,24 @@ while True:
                             detach=True,
                             remove=False,  # Keep container after exit so we can fetch its files/status
                         )
-                        LOG(f'Container "{launch['launch_image']}" started for "{launch_id}"')
+                        LOG(f'Container "{container.name}" ({container.short_id}) started for "{launch_id}"')
                         state = State.RUNNING
+                        sleep_interval = 0
                     except DockerException as e:
-                        LOG.error(f'Failed to start container "{launch['launch_image']}" for "{launch_id}": {str(e)}')
+                        error_message = f'Failed to start container for "{launch_id}": {str(e)}'
+                        LOG.error(error_message)
                         s3.put_object(
                             Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
                             Bucket=args.s3_bucket_name, 
                             Body=b'',
                             ContentType='application/octet-stream',
-                            Metadata=ResultMetadata(is_ok=False, error_message=f'Failed to start container: {str(e)}', error_code=1).asdict(),
+                            Metadata=ResultMetadata(is_ok=False, error_message=error_message, error_code=1).asdict(),
                         )
                         launch_id = None
                         launch = None
                         container = None
                         state = State.IDLE
+                        sleep_interval = 0
             finally:
                 pull_result = None
                 pull_finished_event = None
@@ -246,7 +256,7 @@ while True:
             LOG.debug(f'{exit_attrs=}')
             exit_code = exit_attrs['ExitCode']
             
-            LOG(f'Container for "{launch_id}" finished: status="{container.status}", exit code={exit_code}')
+            LOG(f'Container "{container.name}" ({container.short_id}) for "{launch_id}" finished: status="{container.status}", exit code={exit_code}')
             response = b''
 
             if exit_code == 0:
@@ -254,7 +264,7 @@ while True:
         
                 if 'result_fname' in launch:
                     result_fname = launch['result_fname']
-                    LOG.debug(f'Fetching "{result_fname}" from container')
+                    LOG.debug(f'Fetching "{result_fname}" from container "{container.name}" ({container.short_id})')
                     # get_archive returns a raw tar stream of the target file/folder
                     stream, stat = container.get_archive(result_fname)
                     file_data = b''
@@ -281,9 +291,10 @@ while True:
             launch_id = None
             launch = None
             container = None
+            sleep_interval = 0
             state = State.IDLE
     
-    time.sleep(args.heartbeat_interval)
+    time.sleep(sleep_interval)
     
 
 
