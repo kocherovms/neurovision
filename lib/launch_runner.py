@@ -13,6 +13,7 @@ import logging
 import boto3
 import docker
 from docker.errors import APIError, DockerException
+from docker.types import DeviceRequest
 import tarfile
 
 import lang_utils as lu
@@ -22,7 +23,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--s3_endpoint_url', type=str, default='https://s3.ru-7.storage.selcloud.ru:443')
 parser.add_argument('--s3_bucket_name', type=str, default='neurolab')
 parser.add_argument('--key_prefix', type=str, default='runners')
-parser.add_argument('--poll_interval', type=int, default=7)
 parser.add_argument('--heartbeat_interval', type=int, default=10)
 parser.add_argument('--log_level', type=str, default='info')
 args = parser.parse_args()
@@ -33,7 +33,8 @@ LOG.enable('stdout', False)
 LOG.enable('verbose_stdout', True)
 LOG.set_log_level('all', logging.getLevelName(args.log_level.upper()))
 
-s3 = boto3.client('s3', endpoint_url=args.s3_endpoint_url)
+s3_session = boto3.Session()
+s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url)
 runner_name = f'{socket.gethostname()}_{int(time.time())}'
 LOG.info(f'Runner "{runner_name}" ready')
 
@@ -85,8 +86,23 @@ while True:
             s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
             
             try:
+                s3_credentials = s3_session.get_credentials()
+                # --gpus=all 
                 container = docker_client.containers.run(
                     image=launch['launch_image'],
+                    environment=dict(
+                        AWS_ACCESS_KEY_ID=s3_credentials.access_key,
+                        AWS_SECRET_ACCESS_KEY=s3_credentials.secret_key,
+                        AWS_DEFAULT_REGION=s3_session.region_name,
+                    ),
+                    shm_size=lu.coalesce(launch.get('shm_size'), '16G'),
+                    volumes=['/dev/log:/dev/log'],
+                    device_requests=[
+                        DeviceRequest(
+                            count=-1,                             # -1 means "all" GPUs
+                            capabilities=[["gpu"]]               # Requests the GPU capability
+                        )
+                    ],
                     detach=True,
                     remove=False,  # Keep container after exit so we can fetch its files/status
                 )
@@ -99,7 +115,7 @@ while True:
                     Bucket=args.s3_bucket_name, 
                     Body=b'',
                     ContentType='application/octet-stream',
-                    Metadata=ResultMetadata(is_ok=False, error_message=str(e), error_code=1).asdict(),
+                    Metadata=ResultMetadata(is_ok=False, error_message=f'Failed to start container: {str(e)}', error_code=1).asdict(),
                 )
                 launch_id = None
                 launch = None
@@ -145,8 +161,6 @@ while True:
             else:
                 metadata = ResultMetadata(is_ok=False, error_message=exit_attrs['Error'], error_code=exit_code)
 
-            print(f'kms@ {metadata.asdict()=}')
-            
             s3.put_object(
                 Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
                 Bucket=args.s3_bucket_name, 
@@ -154,7 +168,7 @@ while True:
                 ContentType='application/octet-stream',
                 Metadata=metadata.asdict(),
             )
-            LOG(f'Launch "{launch_id}" is complete {lu.when(metadata.is_ok, 'succesfully', 'with FAILURE')}')
+            LOG(f'Launch "{launch_id}" completed {lu.when(metadata.is_ok, 'succesfully', 'with FAILURE')}')
             launch_id = None
             launch = None
             container = None

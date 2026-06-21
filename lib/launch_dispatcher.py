@@ -8,6 +8,8 @@ import dataclasses
 from dataclasses import dataclass
 
 import pika
+import boto3
+import botocore
 
 import lang_utils as lu
 from logging_utils import *
@@ -106,10 +108,10 @@ class LaunchDispatcher:
             
             with open(self.launches_fname, 'r') as f:
                 loaded = json.load(f)
-                self.launches.update(dict(map(lambda kv: (kv[0], Launch(**kv[1])), loaded)))
+                self.launches.update(dict(map(lambda kv: (kv[0], Launch(**kv[1])), loaded.items())))
 
                 for k, v in self.launches.items():
-                    Logging.get().debug(f'Loaded launche "{k}": {v}')
+                    Logging.get().debug(f'Loaded launch "{k}": {v}')
                 
                 Logging.get().info(f'Loaded {len(self.launches)} launches')
 
@@ -126,155 +128,158 @@ class LaunchDispatcher:
         Logging.get().debug(f'on_idle')
         my_time = time.time()
         is_launches_dirty = False
-        
-        # Update state of runners - find out which are alive/dead
-        response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name, Prefix=f'{self.key_prefix}/heartbeats')
 
-        for obj in response.get('Contents', []):
-            key = obj['Key']
-            Logging.get().debug(f'Processing heartbeat "{key}"')
-            key_payload = os.path.basename(key)
-            sep_index = key_payload.find('_')
-
-            if sep_index == -1:
-                heartbeat_time = lu.from_str(int, key_payload, 0)
-                running_launch_id = None
-            else:
-                assert sep_index > 0, sep_index
-                heartbeat_time = lu.from_str(int, key_payload[:sep_index], 0)
-                running_launch_id = key_payload[sep_index+1:]
-                
-            runner_name = os.path.basename(os.path.dirname(key))
-            assert len(runner_name) > 0
-
-            if not runner_name in self.runners:
-                # New runner
-                eol_time = heartbeat_time + self.eol_duration
-
-                if eol_time > my_time:
-                    self.runners[runner_name] = LaunchRunner(
-                        name=runner_name,
-                        eol_time=eol_time,
-                        launch_id=running_launch_id,
-                    )
-                    Logging.get().info(f'New runner "{runner_name}" with {lu.when(running_launch_id, f'running launch "{running_launch_id}"', 'no running launch')}')
+        try:
+            # Update state of runners - find out which are alive/dead
+            response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name, Prefix=f'{self.key_prefix}/heartbeats')
+    
+            for obj in response.get('Contents', []):
+                key = obj['Key']
+                Logging.get().debug(f'Processing heartbeat "{key}"')
+                key_payload = os.path.basename(key)
+                sep_index = key_payload.find('_')
+    
+                if sep_index == -1:
+                    heartbeat_time = lu.from_str(int, key_payload, 0)
+                    running_launch_id = None
                 else:
-                    Logging.get().debug(f'Ignoring stale heartbeat for "{runner_name}": {eol_time=}, {my_time=}, delta={my_time - eol_time}')
-            else:
-                # Update runner
-                self.runners[runner_name].eol_time = heartbeat_time + self.eol_duration
-
-                if self.runners[runner_name].launch_id != running_launch_id:
-                    Logging.get().warn(f'Inconsistency: runner "{runner_name}": {self.runners[runner_name].launch_id=} vs {running_launch_id=}!')
-
-            self.s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
-
-        # Recyle dead runners
-        dead_runner_names = []
-        
-        for runner_name, runner in self.runners.items():
-            eol_time = self.runners[runner_name].eol_time
+                    assert sep_index > 0, sep_index
+                    heartbeat_time = lu.from_str(int, key_payload[:sep_index], 0)
+                    running_launch_id = key_payload[sep_index+1:]
+                    
+                runner_name = os.path.basename(os.path.dirname(key))
+                assert len(runner_name) > 0
+    
+                if not runner_name in self.runners:
+                    # New runner
+                    eol_time = heartbeat_time + self.eol_duration
+    
+                    if eol_time > my_time:
+                        self.runners[runner_name] = LaunchRunner(
+                            name=runner_name,
+                            eol_time=eol_time,
+                            launch_id=running_launch_id,
+                        )
+                        Logging.get().info(f'New runner "{runner_name}" with {lu.when(running_launch_id, f'running launch "{running_launch_id}"', 'no running launch')}')
+                    else:
+                        Logging.get().debug(f'Ignoring stale heartbeat for "{runner_name}": {eol_time=}, {my_time=}, delta={my_time - eol_time}')
+                else:
+                    # Update runner
+                    self.runners[runner_name].eol_time = heartbeat_time + self.eol_duration
+    
+                    if self.runners[runner_name].launch_id != running_launch_id:
+                        Logging.get().warn(f'Inconsistency: runner "{runner_name}": {self.runners[runner_name].launch_id=} vs {running_launch_id=}!')
+    
+                self.s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
+    
+            # Recyle dead runners
+            dead_runner_names = []
             
-            if eol_time < my_time:
-                Logging.get().info(f'Runner "{runner_name}" is dead: {eol_time=}, {my_time=}, delta={my_time - eol_time}')
-                dead_runner_names.append(runner_name)
-
-        # Move back launches from dead runners
-        for runner_name in dead_runner_names:
-            runner = self.runners[runner_name]
-            del self.runners[runner_name]
-            assert not runner_name in self.runners
-
-            if runner.launch_id is not None:
-                launch_id = runner.launch_id
+            for runner_name, runner in self.runners.items():
+                eol_time = self.runners[runner_name].eol_time
                 
+                if eol_time < my_time:
+                    Logging.get().info(f'Runner "{runner_name}" is dead: {eol_time=}, {my_time=}, delta={my_time - eol_time}')
+                    dead_runner_names.append(runner_name)
+    
+            # Move back launches from dead runners
+            for runner_name in dead_runner_names:
+                runner = self.runners[runner_name]
+                del self.runners[runner_name]
+                assert not runner_name in self.runners
+    
+                if runner.launch_id is not None:
+                    launch_id = runner.launch_id
+                    
+                    if not launch_id in self.launches:
+                        Logging.get().warn(f'Dead runner "{runner_name}" refers to unknown launch "{launch_id}"')
+                    else:
+                        launch = self.launches[launch_id]
+                        
+                        if launch.status != LaunchStatus.RUNNING:
+                            Logging.get().warn(f'Inconsistency: launch "{launch_id}" assigned for dead runner "{runner_name}" has status={launch.status.name} which is not RUNNING!')
+    
+                        launch.status = LaunchStatus.PENDING
+                        is_launches_dirty = True
+                        Logging.get().info(f'Launch "{launch_id}" brought back to PENDING status from dead runner "{runner_name}"')
+    
+            # Collect launch results
+            response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name, Prefix=f'{self.key_prefix}/complete_launches')
+    
+            for obj in response.get('Contents', []):
+                key = obj['Key']
+                launch_id = os.path.basename(key)
+                runner_name = os.path.basename(os.path.dirname(key))
+                Logging.get().info(f'Processing complete launch "{launch_id}" from runner "{runner_name}"')
+                launch_result = self.s3.get_object(Bucket=self.s3_bucket_name, Key=key)
+                launch_result_metadata = launch_result['Metadata']
+                Logging.get().debug(f'{launch_result_metadata=}')
+                launch_result_body = launch_result['Body'].read()
+                Logging.get().info(f'Launch result size={len(launch_result_body)}, {type(launch_result_body)=}')
+    
+                if not runner_name in self.runners:
+                    Logging.get().warn(f'Unknown runner "{runner_name}", do not know which runner to mark free')
+                else:
+                    self.runners[runner_name].launch_id = None
+                    Logging.get().info(f'Runner "{runner_name}" is marked free')
+    
                 if not launch_id in self.launches:
-                    Logging.get().warn(f'Dead runner "{runner_name}" refers to unknown launch "{launch_id}"')
+                    Logging.get().warn(f'Unknown launch "{launch_id}", do not know where to return result')
                 else:
                     launch = self.launches[launch_id]
-                    
+    
                     if launch.status != LaunchStatus.RUNNING:
-                        Logging.get().warn(f'Inconsistency: launch "{launch_id}" assigned for dead runner "{runner_name}" has status={launch.status.name} which is not RUNNING!')
-
-                    launch.status = LaunchStatus.PENDING
+                        Logging.get().warn(f'Launch "{launch_id}" has status={launch.status.name} which is not RUNNING. Inconsistency!')
+                    
+                    properties = pika.spec.BasicProperties(
+                        delivery_mode=pika.DeliveryMode.Persistent,
+                        headers=dict(
+                            is_ok=launch_result_metadata['is_ok'] == str(True),
+                            error_message=launch_result_metadata.get('error_message', None),
+                            error_code=lu.when(launch_result_metadata.get('error_code'), lambda: int(launch_result_metadata['error_code']), None),
+                        ),
+                    )
+                    self.rmq_channel.basic_publish(
+                        exchange='', 
+                        routing_key=launch.reply_to, 
+                        body=launch_result_body,
+                        properties=properties,
+                    )
+    
+                    Logging.get().info(f'Launch results sent to {launch.reply_to}')
+                    del self.launches[launch_id]
+                    not launch_id in self.launches
                     is_launches_dirty = True
-                    Logging.get().info(f'Launch "{launch_id}" brought back to PENDING status from dead runner "{runner_name}"')
-
-        # Collect launch results
-        response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name, Prefix=f'{self.key_prefix}/complete_launches')
-
-        for obj in response.get('Contents', []):
-            key = obj['Key']
-            launch_id = os.path.basename(key)
-            runner_name = os.path.basename(os.path.dirname(key))
-            Logging.get().info(f'Processing complete launch "{launch_id}" from runner "{runner_name}"')
-            launch_result = self.s3.get_object(Bucket=self.s3_bucket_name, Key=key)
-            launch_result_metadata = launch_result['Metadata']
-            Logging.get().debug(f'{launch_result_metadata=}')
-            launch_result_body = launch_result['Body'].read()
-            Logging.get().info(f'Launch result size={len(launch_result_body)}, {type(launch_result_body)=}')
-
-            if not runner_name in self.runners:
-                Logging.get().warn(f'Unknown runner "{runner_name}", do not know which runner to mark free')
-            else:
-                self.runners[runner_name].launch_id = None
-                Logging.get().info(f'Runner "{runner_name}" is marked free')
-
-            if not launch_id in self.launches:
-                Logging.get().warn(f'Unknown launch "{launch_id}", do not know where to return result')
-            else:
-                launch = self.launches[launch_id]
-
-                if launch.status != LaunchStatus.RUNNING:
-                    Logging.get().warn(f'Launch "{launch_id}" has status={launch.status.name} which is not RUNNING. Inconsistency!')
-                
-                properties = pika.spec.BasicProperties(
-                    delivery_mode=pika.DeliveryMode.Persistent,
-                    headers=dict(
-                        is_ok=launch_result_metadata['is_ok'] == str(True),
-                        error_message=launch_result_metadata.get('error_message', None),
-                        error_code=lu.when(launch_result_metadata.get('error_code'), lambda: int(launch_result_metadata['error_code']), None),
-                    ),
-                )
-                self.rmq_channel.basic_publish(
-                    exchange='', 
-                    routing_key=launch.reply_to, 
-                    body=launch_result_body,
-                    properties=properties,
-                )
-
-                Logging.get().info(f'Launch results sent to {launch.reply_to}')
-                del self.launches[launch_id]
-                not launch_id in self.launches
-                is_launches_dirty = True
-
-            self.s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
-
-        # Dispatch pending launches to runners
-        free_runner_names = set(map(lambda kv: kv[0], filter(lambda kv: kv[1].launch_id is None, self.runners.items())))
-        pending_launches_count = list(filter(lambda kv: kv[1].status == LaunchStatus.PENDING, self.launches.items()))
-        Logging.get().debug(f'Free runners count={len(free_runner_names)}, pending launches count={len(pending_launches_count)}')
-
-        if free_runner_names:
-            for launch_id, launch in pending_launches_count:
-                free_runner_name = free_runner_names.pop()
-                free_runner = self.runners[free_runner_name]
-                free_runner.launch_id = launch_id
-                self.s3.put_object(
-                    Key=f'{args.key_prefix}/pending_launches/{free_runner_name}/{launch_id}',
-                    Bucket=args.s3_bucket_name,
-                    Body=json.dumps(launch.request).encode(),
-                )
-
-                launch.status = LaunchStatus.RUNNING
-                is_launches_dirty = True
-                Logging.get().info(f'Launch "{launch_id}" dispatched to runner "{free_runner_name}"')
-
-                if not free_runner_names:
-                    break
-
-        if is_launches_dirty:
-            self.save_launches()
+    
+                self.s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
+    
+            # Dispatch pending launches to runners
+            free_runner_names = set(map(lambda kv: kv[0], filter(lambda kv: kv[1].launch_id is None, self.runners.items())))
+            pending_launches_count = list(filter(lambda kv: kv[1].status == LaunchStatus.PENDING, self.launches.items()))
+            Logging.get().debug(f'Free runners count={len(free_runner_names)}, pending launches count={len(pending_launches_count)}')
+    
+            if free_runner_names:
+                for launch_id, launch in pending_launches_count:
+                    free_runner_name = free_runner_names.pop()
+                    free_runner = self.runners[free_runner_name]
+                    free_runner.launch_id = launch_id
+                    self.s3.put_object(
+                        Key=f'{args.key_prefix}/pending_launches/{free_runner_name}/{launch_id}',
+                        Bucket=args.s3_bucket_name,
+                        Body=json.dumps(launch.request).encode(),
+                    )
+    
+                    launch.status = LaunchStatus.RUNNING
+                    is_launches_dirty = True
+                    Logging.get().info(f'Launch "{launch_id}" dispatched to runner "{free_runner_name}"')
+    
+                    if not free_runner_names:
+                        break
+    
+            if is_launches_dirty:
+                self.save_launches()
+        except botocore.exceptions.HTTPClientError as e:
+            Logging.get().error(f'Connectivity error: {str(e)}')
         
         self.rmq_connection.call_later(delay=1, callback=self.on_idle)
 
@@ -305,7 +310,6 @@ class LaunchDispatcher:
 
 if __name__ == "__main__":
     import argparse
-    import boto3
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--rmq_connection_url', type=str, default='amqp://guest:guest@rabbitmq:5672/%2F')
