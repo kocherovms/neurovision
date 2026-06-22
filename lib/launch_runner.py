@@ -304,7 +304,7 @@ while True:
                 Metadata=metadata.asdict(),
             )
 
-            if launch.get('keep_container', True) == False and not is_container_lost:
+            if metadata.is_ok and launch.get('keep_container', False) == False and not is_container_lost:
                 container.remove()
                 LOG(f'Container removed')
             
