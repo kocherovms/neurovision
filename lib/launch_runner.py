@@ -87,7 +87,6 @@ env_vars['AWS_DEFAULT_REGION'] = s3_session.region_name
 
 s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url)
 
-
 class State(IntEnum):
     IDLE = auto()
     IMAGE_PULL = auto()
@@ -268,7 +267,9 @@ while True:
                 response = b''
     
                 if exit_code != 0:
-                    metadata = ResultMetadata(is_ok=False, error_message=exit_attrs['Error'], error_code=exit_code)
+                    error_message = exit_attrs['Error']
+                    error_message = lu.when(error_message is None or error_message == '', f'See logs of container "{container.name}" ({container.short_id})', error_message)
+                    metadata = ResultMetadata(is_ok=False, error_message=error_message, error_code=exit_code)
                 else:
                     metadata = ResultMetadata(is_ok=True)
             
