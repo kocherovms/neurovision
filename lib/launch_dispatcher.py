@@ -280,6 +280,8 @@ class LaunchDispatcher:
                 self.save_launches()
         except botocore.exceptions.HTTPClientError as e:
             Logging.get().error(f'Connectivity error: {str(e)}')
+        except botocore.exceptions.ConnectionError as e:
+            Logging.get().error(f'Connectivity error: {str(e)}')
         
         self.rmq_connection.call_later(delay=1, callback=self.on_idle)
 
@@ -318,8 +320,6 @@ if __name__ == "__main__":
     parser.add_argument('--key_prefix', type=str, default='runners')
     parser.add_argument('--log_level', type=str, default='info')
     parser.add_argument('--launches_fname', type=str, default=None)
-    # parser.add_argument('--poll_interval', type=int, default=7)
-    # parser.add_argument('--heartbeat_interval', type=int, default=10)
     args = parser.parse_args()
     
     LOG = Logging.get()
