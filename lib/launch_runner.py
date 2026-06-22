@@ -264,9 +264,8 @@ while True:
         
                 if 'result_fname' in launch:
                     result_fname = launch['result_fname']
-
-                    if os.path.exists(result_fname):
-                        LOG.debug(f'Fetching "{result_fname}" from container')
+                    LOG.debug(f'Fetching "{result_fname}" from container')
+                    try:
                         # get_archive returns a raw tar stream of the target file/folder
                         stream, stat = container.get_archive(result_fname)
                         file_data = b''
@@ -279,10 +278,10 @@ while True:
                             response = result_fname_f.read()
             
                         LOG.info(f'Fetched {len(response)} bytes of result file "{result_fname}" from container')
-                    else:
+                    except DockerException as e:
                         metadata = ResultMetadata(
                             is_ok=False, 
-                            error_message=f'Failed to locate result file "{result_fname}" in container', 
+                            error_message=f'Failed to fetch result file "{result_fname}" in container: {str(e)}', 
                             error_code=1
                         )
                         LOG.error(metadata.error_message)
@@ -296,6 +295,11 @@ while True:
                 ContentType='application/octet-stream',
                 Metadata=metadata.asdict(),
             )
+
+            if launch.get('keep_container', True) == False:
+                container.remove()
+                LOG(f'Container removed')
+            
             LOG(f'Launch "{launch_id}" completed {lu.when(metadata.is_ok, 'succesfully', 'with FAILURE')}')
             launch_id = None
             launch = None
