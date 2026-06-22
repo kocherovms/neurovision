@@ -13,7 +13,7 @@ import threading
 
 import boto3
 import docker
-from docker.errors import APIError, DockerException
+from docker.errors import APIError, DockerException, NotFound
 from docker.types import DeviceRequest
 import tarfile
 
@@ -247,46 +247,54 @@ while True:
         assert pull_finished_event is None
         assert pull_thread is None
         assert container is not None
+        is_container_lost = False
 
-        container.reload()
-        LOG.debug(f'{container.status=}')
+        try:
+            container.reload()
+            LOG.debug(f'{container.status=}')
+        except NotFound:
+            is_container_lost = True
+            LOG.error(f'Container is lost')
     
-        if container.status in ['exited', 'dead']:
-            exit_attrs = container.attrs["State"]
-            LOG.debug(f'{exit_attrs=}')
-            exit_code = exit_attrs['ExitCode']
-            
-            LOG(f'Container "{container.name}" ({container.short_id}) for "{launch_id}" finished: status="{container.status}", exit code={exit_code}')
-            response = b''
-
-            if exit_code == 0:
-                metadata = ResultMetadata(is_ok=True)
-        
-                if 'result_fname' in launch:
-                    result_fname = launch['result_fname']
-                    LOG.debug(f'Fetching "{result_fname}" from container')
-                    try:
-                        # get_archive returns a raw tar stream of the target file/folder
-                        stream, stat = container.get_archive(result_fname)
-                        file_data = b''
-                        
-                        for chunk in stream:
-                            file_data += chunk
-                            
-                        with tarfile.open(fileobj=io.BytesIO(file_data)) as tar:
-                            result_fname_f = tar.extractfile(stat['name'])
-                            response = result_fname_f.read()
-            
-                        LOG.info(f'Fetched {len(response)} bytes of result file "{result_fname}" from container')
-                    except DockerException as e:
-                        metadata = ResultMetadata(
-                            is_ok=False, 
-                            error_message=f'Failed to fetch result file "{result_fname}" in container: {str(e)}', 
-                            error_code=1
-                        )
-                        LOG.error(metadata.error_message)
+        if container.status in ['exited', 'dead'] or is_container_lost:
+            if is_container_lost:
+                metadata = ResultMetadata(is_ok=False, error_message='Container is lost', error_code=1)
             else:
-                metadata = ResultMetadata(is_ok=False, error_message=exit_attrs['Error'], error_code=exit_code)
+                exit_attrs = container.attrs["State"]
+                LOG.debug(f'{exit_attrs=}')
+                exit_code = exit_attrs['ExitCode']
+                
+                LOG(f'Container "{container.name}" ({container.short_id}) for "{launch_id}" finished: status="{container.status}", exit code={exit_code}')
+                response = b''
+    
+                if exit_code != 0:
+                    metadata = ResultMetadata(is_ok=False, error_message=exit_attrs['Error'], error_code=exit_code)
+                else:
+                    metadata = ResultMetadata(is_ok=True)
+            
+                    if 'result_fname' in launch:
+                        result_fname = launch['result_fname']
+                        LOG.debug(f'Fetching "{result_fname}" from container')
+                        try:
+                            # get_archive returns a raw tar stream of the target file/folder
+                            stream, stat = container.get_archive(result_fname)
+                            file_data = b''
+                            
+                            for chunk in stream:
+                                file_data += chunk
+                                
+                            with tarfile.open(fileobj=io.BytesIO(file_data)) as tar:
+                                result_fname_f = tar.extractfile(stat['name'])
+                                response = result_fname_f.read()
+                
+                            LOG.info(f'Fetched {len(response)} bytes of result file "{result_fname}" from container')
+                        except DockerException as e:
+                            metadata = ResultMetadata(
+                                is_ok=False, 
+                                error_message=f'Failed to fetch result file "{result_fname}" in container: {str(e)}', 
+                                error_code=1,
+                            )
+                            LOG.error(metadata.error_message)
 
             s3.put_object(
                 Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
@@ -296,7 +304,7 @@ while True:
                 Metadata=metadata.asdict(),
             )
 
-            if launch.get('keep_container', True) == False:
+            if launch.get('keep_container', True) == False and not is_container_lost:
                 container.remove()
                 LOG(f'Container removed')
             
