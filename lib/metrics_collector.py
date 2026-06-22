@@ -315,7 +315,7 @@ class RmqSummaryCollector(RmqSummaryBase):
         self.channel.start_consuming()
 
     def on_message(self, ch, method, properties, body):
-        Logging.get().trace(f'on_message: method={method}, properties={properties}, len(body)={len(body)}')
+        Logging.get().debug(f'on_message: method={method}, properties={properties}, len(body)={len(body)}')
         logic_method = properties.headers['method']
         log_dir = properties.headers['log_dir']
         global_step = properties.headers.get('global_step', None)
@@ -425,14 +425,28 @@ class S3SummaryCollector:
         # S3 naturally returns keys sorted alphabetically (batch_000000.json, batch_000001.json, etc.)
         for obj in response.get('Contents', []):
             key = obj['Key']
-            Logging.get().trace(f'Processing {key=}')
-            key_parts = key.split('/')
-
+            Logging.get().debug(f'Processing {key=}')
+            
+            if self.key_prefix is not None and len(self.key_prefix) > 0:
+                unprefixed_key = key[len(self.key_prefix) + 1:] # +1 for slash
+                # Logging.get().debug(f'Unprefixed key="{key}"')
+            else:
+                unprefixed_key = key
+            
+            key_parts = unprefixed_key.split('/')
+                
             if len(key_parts) < 4:
                 raise ValueError(f'Key "{key}" has invalid format')
+
+            if 'metrics' in key_parts:
+                kind = 'metrics'
+            elif 'assets' in key_parts:
+                kind = 'assets'
+            else:
+                raise ValueError(f'Key "{key}" does not contain known kind markers')  
             
-            log_dir = '/'.join(key_parts[:2])
-            kind = key_parts[2]
+            kind_index = key_parts.index(kind)
+            log_dir = '/'.join(key_parts[:kind_index])
 
             match kind:
                 case 'metrics': 
@@ -450,7 +464,7 @@ class S3SummaryCollector:
                     raise ValueError(f'Key "{key}" has unsupported {kind=}')
 
             self.s3.delete_object(Bucket=self.s3_bucket_name, Key=key)
-            Logging.get().trace(f'Processed and deleted {key=}')
+            Logging.get().debug(f'Processed and deleted {key=}')
             is_any_processing = True
 
         return is_any_processing
