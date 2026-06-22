@@ -27,7 +27,7 @@ parser.add_argument('--s3_bucket_name', type=str, default='neurolab')
 parser.add_argument('--key_prefix', type=str, default='runners')
 parser.add_argument('--heartbeat_interval', type=int, default=10)
 parser.add_argument('--log_level', type=str, default='info')
-parser.add_argument('-e', action='append', default=[])
+parser.add_argument('-e', action='append', default=[]) # env vars to forward
 args = parser.parse_args()
 env_vars = {}
 
@@ -264,19 +264,28 @@ while True:
         
                 if 'result_fname' in launch:
                     result_fname = launch['result_fname']
-                    LOG.debug(f'Fetching "{result_fname}" from container "{container.name}" ({container.short_id})')
-                    # get_archive returns a raw tar stream of the target file/folder
-                    stream, stat = container.get_archive(result_fname)
-                    file_data = b''
-                    
-                    for chunk in stream:
-                        file_data += chunk
+
+                    if os.path.exists(result_fname):
+                        LOG.debug(f'Fetching "{result_fname}" from container')
+                        # get_archive returns a raw tar stream of the target file/folder
+                        stream, stat = container.get_archive(result_fname)
+                        file_data = b''
                         
-                    with tarfile.open(fileobj=io.BytesIO(file_data)) as tar:
-                        result_fname_f = tar.extractfile(stat['name'])
-                        response = result_fname_f.read()
-        
-                    LOG.info(f'Fetched {len(response)} bytes of result file "{result_fname}" from container')
+                        for chunk in stream:
+                            file_data += chunk
+                            
+                        with tarfile.open(fileobj=io.BytesIO(file_data)) as tar:
+                            result_fname_f = tar.extractfile(stat['name'])
+                            response = result_fname_f.read()
+            
+                        LOG.info(f'Fetched {len(response)} bytes of result file "{result_fname}" from container')
+                    else:
+                        metadata = ResultMetadata(
+                            is_ok=False, 
+                            error_message=f'Failed to locate result file "{result_fname}" in container', 
+                            error_code=1
+                        )
+                        LOG.error(metadata.error_message)
             else:
                 metadata = ResultMetadata(is_ok=False, error_message=exit_attrs['Error'], error_code=exit_code)
 
