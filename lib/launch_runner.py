@@ -256,6 +256,8 @@ while True:
             LOG.error(f'Container is lost')
     
         if container.status in ['exited', 'dead'] or is_container_lost:
+            response = b''
+            
             if is_container_lost:
                 metadata = ResultMetadata(is_ok=False, error_message='Container is lost', error_code=1)
             else:
@@ -264,7 +266,6 @@ while True:
                 exit_code = exit_attrs['ExitCode']
                 
                 LOG(f'Container "{container.name}" ({container.short_id}) for "{launch_id}" finished: status="{container.status}", exit code={exit_code}')
-                response = b''
     
                 if exit_code != 0:
                     error_message = exit_attrs['Error']
