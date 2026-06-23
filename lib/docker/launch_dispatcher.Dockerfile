@@ -2,6 +2,9 @@ FROM ubuntu:24.04
 
 RUN apt update
 RUN apt install -y python3-pip
+RUN apt install -y tzdata
+ENV TZ=Europe/Moscow
+
 RUN pip install --break-system-packages pika  
 RUN pip install --break-system-packages boto3 
 RUN pip install --break-system-packages certifi # req-d for boto3 to work (otherwise boto3 will complain about self signed cert)
