@@ -169,8 +169,8 @@ class LaunchDispatcher:
     
                     if self.runners[runner_name].launch_id != running_launch_id:
                         Logging.get().warn(f'Inconsistency: runner "{runner_name}": {self.runners[runner_name].launch_id=} vs {running_launch_id=}!')
-    
-                self.s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
+
+                self.delete_s3_object_with_retries(key)
     
             # Recyle dead runners
             dead_runner_names = []
@@ -250,8 +250,8 @@ class LaunchDispatcher:
                     del self.launches[launch_id]
                     not launch_id in self.launches
                     is_launches_dirty = True
-    
-                self.s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
+
+                self.delete_s3_object_with_retries(key)
     
             # Dispatch pending launches to runners
             free_runner_names = set(map(lambda kv: kv[0], filter(lambda kv: kv[1].launch_id is None, self.runners.items())))
@@ -264,8 +264,8 @@ class LaunchDispatcher:
                     free_runner = self.runners[free_runner_name]
                     free_runner.launch_id = launch_id
                     self.s3.put_object(
-                        Key=f'{args.key_prefix}/pending_launches/{free_runner_name}/{launch_id}',
-                        Bucket=args.s3_bucket_name,
+                        Key=f'{self.key_prefix}/pending_launches/{free_runner_name}/{launch_id}',
+                        Bucket=self.s3_bucket_name,
                         Body=json.dumps(launch.request).encode(),
                     )
     
@@ -309,6 +309,24 @@ class LaunchDispatcher:
         with open(self.launches_fname, 'w') as f:
             json.dump(dict(map(lambda kv: (kv[0], dataclasses.asdict(kv[1])), self.launches.items())), f)
             Logging.get().info(f'Saved {len(self.launches)} launches to "{self.launches_fname}"')
+
+    def delete_s3_object_with_retries(self, key, retries_count=2):
+        delay = 0.5
+
+        for _ in range(retries_count):
+            try:
+                self.s3.delete_object(Bucket=self.s3_bucket_name, Key=key)
+                return
+            except botocore.exceptions.ClientError as e:
+                if e.response.get('Error', {}).get('Code', {}) == 'OperationAborted':
+                    Logging.get().warn(f'Failed to delete_object "{key}": OperationAborted. Retrying in {delay} seconds')
+                    time.sleep(delay)
+                    delay *= 2  
+                else:
+                    raise e  
+
+        raise Exception(f'Failed to delete_object "{key}": {retries_count} exhausted')
+                    
 
 if __name__ == "__main__":
     import argparse
