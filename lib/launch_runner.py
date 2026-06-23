@@ -105,12 +105,14 @@ class ResultMetadata:
     is_ok: bool = None
     error_message: str = None
     error_code: int = None
+    runner_name: str = None
 
     def asdict(self):
         return dict(
             is_ok=str(self.is_ok), 
             error_message=lu.coalesce(self.error_message, ''), 
             error_code=lu.when(self.error_code, lambda: str(self.error_code),  ''),
+            runner_name=runner_name,
         )
 
 # To be called in a separate thread (to avoid block if main process)
@@ -188,12 +190,18 @@ while True:
         if pull_finished_event.is_set():
             try:
                 if pull_result.is_ok == False:
+                    metadata = ResultMetadata(
+                        is_ok=False, 
+                        error_message=f'Failed to pull launch image: {pull_result.error_message}', 
+                        error_code=1,
+                        runner_name=runner_name,
+                    )
                     s3.put_object(
                         Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
                         Bucket=args.s3_bucket_name, 
                         Body=b'',
                         ContentType='application/octet-stream',
-                        Metadata=ResultMetadata(is_ok=False, error_message=f'Failed to pull launch image: {pull_result.error_message}', error_code=1).asdict(),
+                        Metadata=metadata.asdict(),
                     )
                     launch_id = None
                     launch = None
@@ -222,12 +230,18 @@ while True:
                     except DockerException as e:
                         error_message = f'Failed to start container for "{launch_id}": {str(e)}'
                         LOG.error(error_message)
+                        metadata = ResultMetadata(
+                            is_ok=False, 
+                            error_message=error_message, 
+                            error_code=1, 
+                            runner_name=runner_name,
+                        )
                         s3.put_object(
                             Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
                             Bucket=args.s3_bucket_name, 
                             Body=b'',
                             ContentType='application/octet-stream',
-                            Metadata=ResultMetadata(is_ok=False, error_message=error_message, error_code=1).asdict(),
+                            Metadata=metadata.asdict(),
                         )
                         launch_id = None
                         launch = None
@@ -259,7 +273,7 @@ while True:
             response = b''
             
             if is_container_lost:
-                metadata = ResultMetadata(is_ok=False, error_message='Container is lost', error_code=1)
+                metadata = ResultMetadata(is_ok=False, error_message='Container is lost', error_code=1, runner_name=runner_name)
             else:
                 exit_attrs = container.attrs["State"]
                 LOG.debug(f'{exit_attrs=}')
@@ -270,9 +284,9 @@ while True:
                 if exit_code != 0:
                     error_message = exit_attrs['Error']
                     error_message = lu.when(error_message is None or error_message == '', f'See logs of container "{container.name}" ({container.short_id})', error_message)
-                    metadata = ResultMetadata(is_ok=False, error_message=error_message, error_code=exit_code)
+                    metadata = ResultMetadata(is_ok=False, error_message=error_message, error_code=exit_code, runner_name=runner_name)
                 else:
-                    metadata = ResultMetadata(is_ok=True)
+                    metadata = ResultMetadata(is_ok=True, runner_name=runner_name)
             
                     if 'result_fname' in launch:
                         result_fname = launch['result_fname']
@@ -295,6 +309,7 @@ while True:
                                 is_ok=False, 
                                 error_message=f'Failed to fetch result file "{result_fname}" in container: {str(e)}', 
                                 error_code=1,
+                                runner_name=runner_name,
                             )
                             LOG.error(metadata.error_message)
 
