@@ -142,7 +142,11 @@ while True:
         Bucket=args.s3_bucket_name,
         Body=b'',
     )
-    LOG.debug(f'Heartbeat sent "{heartbeat_key}", state={state.name}')
+    LOG.debug(
+        f'Heartbeat sent "{heartbeat_key}", ' +
+        f'state={state.name}' +
+        lu.when(container is not None, lambda: f', container "{container.name}" ({container.short_id})', ''),
+    )
 
     if state == State.IDLE:
         assert launch_id is None
