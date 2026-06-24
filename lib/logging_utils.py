@@ -6,6 +6,8 @@ import logging
 import logging.handlers
 from dataclasses import dataclass
 
+import lang_utils as lu
+
 def if_verbose(verbosity, verbosity_threshold, func):
     if verbosity < verbosity_threshold:
         return
@@ -58,24 +60,17 @@ class Logging:
             syslog_handler.ident = 'kmstag:'
             syslog_logger.addHandler(syslog_handler)
 
+        stdout = lu.when(use_raw_stdout, lambda: open('/dev/stdout', 'w', buffering=1), sys.stdout)
         stdout_logger = logging.getLogger('kmslog_stdout')
         
         if not stdout_logger.hasHandlers():
-            if use_raw_stdout:
-                stream_handler = logging.StreamHandler(open('/dev/stdout', 'w'))
-            else:
-                stream_handler = logging.StreamHandler(sys.stdout)
-                
+            stream_handler = logging.StreamHandler(stdout)
             stdout_logger.addHandler(stream_handler)
 
         verbose_stdout_logger = logging.getLogger('kmslog_verbose_stdout')
         
         if not verbose_stdout_logger.hasHandlers():
-            if use_raw_stdout:
-                stream_handler = logging.StreamHandler(open('/dev/stdout', 'w'))
-            else:
-                stream_handler = logging.StreamHandler(sys.stdout)
-            
+            stream_handler = logging.StreamHandler(stdout)
             verbose_stdout_logger.addHandler(stream_handler)
 
         self.sinks = dict(
