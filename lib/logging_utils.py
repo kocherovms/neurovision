@@ -24,9 +24,9 @@ class Logging:
     _instance = None
     
     @staticmethod
-    def get():
+    def get(use_raw_stdout=False):
         if Logging._instance is None:
-            return Logging()
+            return Logging(use_raw_stdout)
 
         return Logging._instance
 
@@ -50,7 +50,7 @@ class Logging:
     def trace(s, with_duration=True, when=True):
         Logging.get()(s, with_duration, when, log_level=logging.DEBUG - 1)
 
-    def __init__(self):
+    def __init__(self, use_raw_stdout=False):
         syslog_logger = logging.getLogger('kmslog_syslog')
         
         if not syslog_logger.hasHandlers():
@@ -61,13 +61,21 @@ class Logging:
         stdout_logger = logging.getLogger('kmslog_stdout')
         
         if not stdout_logger.hasHandlers():
-            stream_handler = logging.StreamHandler(sys.stdout)
+            if use_raw_stdout:
+                stream_handler = logging.StreamHandler(open('/dev/stdout', 'w'))
+            else:
+                stream_handler = logging.StreamHandler(sys.stdout)
+                
             stdout_logger.addHandler(stream_handler)
 
         verbose_stdout_logger = logging.getLogger('kmslog_verbose_stdout')
         
         if not verbose_stdout_logger.hasHandlers():
-            stream_handler = logging.StreamHandler(sys.stdout)
+            if use_raw_stdout:
+                stream_handler = logging.StreamHandler(open('/dev/stdout', 'w'))
+            else:
+                stream_handler = logging.StreamHandler(sys.stdout)
+            
             verbose_stdout_logger.addHandler(stream_handler)
 
         self.sinks = dict(
