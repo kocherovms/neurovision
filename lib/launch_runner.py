@@ -28,6 +28,10 @@ parser.add_argument('--key_prefix', type=str, default='runners')
 parser.add_argument('--heartbeat_interval', type=int, default=10)
 parser.add_argument('--log_level', type=str, default='info')
 parser.add_argument('-e', action='append', default=[]) # env vars to forward
+parser.add_argument('--user', type=str, default=None) # user in form of user_id:group_id to use to exec container (e.g. 1000:1000)
+parser.add_argument('--mps', action='store_true') # use nvidia MPS server
+parser.add_argument('--cpuset_cpus', type=str, default=None) # value of cpuset_cpus to forward to container
+
 args = parser.parse_args()
 env_vars = {}
 
@@ -218,8 +222,8 @@ while True:
 
                         if is_gpu_present:
                             device_requests.append(DeviceRequest(count=-1, capabilities=[["gpu"]]))
-                            
-                        container = docker_client.containers.run(
+
+                        kwargs = dict(
                             image=launch['launch_image'],
                             environment=env_vars,
                             shm_size=lu.coalesce(launch.get('shm_size'), '16G'),
@@ -228,6 +232,20 @@ while True:
                             detach=True,
                             remove=False,  # Keep container after exit so we can fetch its files/status
                         )
+
+                        if args.user is not None:
+                            kwargs['user'] = args.user
+
+                        if args.mps:
+                            kwargs['ipc_mode'] = 'host'
+                            kwargs['volumes'].append('/tmp/nvidia-mps:/tmp/nvidia-mps')
+                            env_vars['CUDA_MPS_PIPE_DIRECTORY'] = '/tmp/nvidia-mps'
+
+                        if args.cpuset_cpus is not None:
+                            kwargs['cpuset_cpus'] = args.cpuset_cpus
+
+                        LOG.debug(f'Starting container with params: {kwargs}')
+                        container = docker_client.containers.run(**kwargs)
                         LOG(f'Container "{container.name}" ({container.short_id}) started for "{launch_id}"')
                         state = State.RUNNING
                         sleep_interval = 0
