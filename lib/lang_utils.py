@@ -1,3 +1,5 @@
+import sys
+import importlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -41,6 +43,13 @@ def to_number(v):
         return float(v)
     else:
         return int(v)
+
+def make_module(module_name, source_code):
+    module_spec = importlib.util.spec_from_loader(module_name, loader=None)
+    module = importlib.util.module_from_spec(module_spec)
+    sys.modules[module_name] = module
+    exec(source_code, module.__dict__)
+    return module
 
 @dataclass
 class ScopedVars:
