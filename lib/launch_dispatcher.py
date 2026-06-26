@@ -237,6 +237,7 @@ class LaunchDispatcher:
                             is_ok=launch_result_metadata['is_ok'] == str(True),
                             error_message=launch_result_metadata.get('error_message', None),
                             error_code=lu.when(launch_result_metadata.get('error_code'), lambda: int(launch_result_metadata['error_code']), None),
+                            runner_name=launch_result_metadata['runner_name'],
                         ),
                     )
                     self.rmq_channel.basic_publish(
