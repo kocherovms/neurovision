@@ -211,3 +211,11 @@ def launchit(fname, launch_serial=0, expandvars={}, make_py_file=False, dir_name
             json.dump(processor.nb, f, indent=2) # .ipynb
     
     return new_fname
+
+def extract_source_code(fname):
+    processor = NotebookProcessor()
+
+    with open(fname, 'rt') as f:
+        processor(f, fname, expandvars={}, collect_inds=[], disable_inds=[])
+
+    return '\n'.join(processor.collected_source_lines[None])
