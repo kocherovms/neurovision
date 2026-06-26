@@ -1,18 +1,16 @@
 FROM torch-gpu:2.12.0
-RUN apt update
-RUN apt install vim emacs-nox -y
-RUN apt install git -y
-RUN pip install --break-system-packages jupyterlab ipywidgets  
-RUN pip install --break-system-packages pandas cupy-cuda13x einops matplotlib 
-RUN pip install --break-system-packages tqdm 
-RUN pip install --break-system-packages optuna
-RUN pip install --break-system-packages pika
-RUN pip install --break-system-packages gymnasium 
-RUN pip install --break-system-packages moviepy
-RUN pip install --break-system-packages av
-RUN pip install --break-system-packages papermill
-RUN pip install --break-system-packages scipy
-RUN pip install --break-system-packages boto3
+RUN apt update && apt install -y vim emacs-nox git && rm -rf /var/lib/apt/lists/*
+RUN pip install --break-system-packages --no-cache-dir jupyterlab ipywidgets  
+RUN pip install --break-system-packages --no-cache-dir pandas cupy-cuda13x einops matplotlib 
+RUN pip install --break-system-packages --no-cache-dir tqdm 
+RUN pip install --break-system-packages --no-cache-dir optuna
+RUN pip install --break-system-packages --no-cache-dir pika
+RUN pip install --break-system-packages --no-cache-dir gymnasium 
+RUN pip install --break-system-packages --no-cache-dir moviepy
+RUN pip install --break-system-packages --no-cache-dir av
+RUN pip install --break-system-packages --no-cache-dir papermill
+RUN pip install --break-system-packages --no-cache-dir scipy
+RUN pip install --break-system-packages --no-cache-dir boto3
 ARG CACHEBUST=1
-RUN pip install --break-system-packages ale_py==0.12.0+neurolab --index-url=http://nexus:8081/repository/neurolab-pypi/simple --trusted-host=nexus --no-cache-dir
+RUN pip install --break-system-packages --no-cache-dir ale_py==0.12.0+neurolab --index-url=http://nexus:8081/repository/neurolab-pypi/simple --trusted-host=nexus
 CMD ["/bin/bash"]

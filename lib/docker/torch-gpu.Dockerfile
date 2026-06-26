@@ -1,7 +1,5 @@
 FROM ubuntu:24.04
-RUN apt update
-RUN apt install python3-pip -y
-RUN pip install torch==2.12.0 torchvision --index-url https://download.pytorch.org/whl/cu130 --break-system-packages
-RUN pip install tensorflow --break-system-packages
-RUN pip install tensorboard --break-system-packages
+RUN apt update && apt install -y python3-pip && rm -rf /var/lib/apt/lists/*
+RUN pip install --break-system-packages --no-cache-dir torch==2.12.0 torchvision --index-url https://download.pytorch.org/whl/cu130 
+RUN pip install --break-system-packages --no-cache-dir tensorboard
 CMD ["/bin/bash"]
