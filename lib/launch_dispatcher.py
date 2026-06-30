@@ -97,7 +97,7 @@ class LaunchDispatcher:
         self.key_prefix = key_prefix
 
         # Runners management
-        self.runners = {}
+        self.runners = {}  # runner_name -> LaunchRunner
         self.eol_duration = 60
         
         self.launches = {}
@@ -125,7 +125,7 @@ class LaunchDispatcher:
         self.rmq_channel.start_consuming()
 
     def on_idle(self):
-        Logging.get().debug(f'on_idle')
+        # Logging.get().debug(f'on_idle')
         my_time = time.time()
         is_launches_dirty = False
 
@@ -256,11 +256,14 @@ class LaunchDispatcher:
     
             # Dispatch pending launches to runners
             free_runner_names = set(map(lambda kv: kv[0], filter(lambda kv: kv[1].launch_id is None, self.runners.items())))
-            pending_launches_count = list(filter(lambda kv: kv[1].status == LaunchStatus.PENDING, self.launches.items()))
-            Logging.get().debug(f'Free runners count={len(free_runner_names)}, pending launches count={len(pending_launches_count)}')
+            busy_runners_count = len(self.runners) - len(free_runner_names)
+            pending_launches = list(filter(lambda kv: kv[1].status == LaunchStatus.PENDING, self.launches.items()))
+            running_launches_count = len(self.launches) - len(pending_launches)
+            Logging.get().debug(f'Runners (idle+busy=total): {len(free_runner_names)}+{busy_runners_count}={len(self.runners)}. ' + 
+                                f'Launches (pend+run=total): {len(pending_launches)}+{running_launches_count}={len(self.launches)}')
     
             if free_runner_names:
-                for launch_id, launch in pending_launches_count:
+                for launch_id, launch in pending_launches:
                     free_runner_name = free_runner_names.pop()
                     free_runner = self.runners[free_runner_name]
                     free_runner.launch_id = launch_id
