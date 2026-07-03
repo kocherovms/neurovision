@@ -11,6 +11,4 @@ RUN pip install --break-system-packages --no-cache-dir av
 RUN pip install --break-system-packages --no-cache-dir papermill
 RUN pip install --break-system-packages --no-cache-dir scipy
 RUN pip install --break-system-packages --no-cache-dir boto3
-ARG CACHEBUST=1
-RUN pip install --break-system-packages --no-cache-dir ale_py==0.12.0+neurolab --index-url=http://nexus:8081/repository/neurolab-pypi/simple --trusted-host=nexus
 CMD ["/bin/bash"]
