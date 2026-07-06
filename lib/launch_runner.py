@@ -13,6 +13,7 @@ import threading
 
 import boto3
 import botocore
+import botocore.config
 import docker
 from docker.errors import APIError, DockerException, NotFound
 from docker.types import DeviceRequest
@@ -90,7 +91,16 @@ env_vars['AWS_ACCESS_KEY_ID'] = s3_credentials.access_key
 env_vars['AWS_SECRET_ACCESS_KEY'] = s3_credentials.secret_key
 env_vars['AWS_DEFAULT_REGION'] = s3_session.region_name
 
-s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url)
+config = botocore.config.Config(
+    connect_timeout=20,  # Wait up to 20 seconds to establish a connection
+    read_timeout=20,     # Wait up to 20 seconds to receive data chunks
+    retries={
+        'max_attempts': 10,
+        'mode': 'adaptive'
+    }
+)
+
+s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url, config=config)
 
 class State(IntEnum):
     IDLE = auto()
