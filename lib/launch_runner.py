@@ -33,6 +33,9 @@ parser.add_argument('-e', action='append', default=[]) # env vars to forward
 parser.add_argument('--user', type=str, default=None) # user in form of user_id:group_id to use to exec container (e.g. 1000:1000)
 parser.add_argument('--mps', action='store_true') # use nvidia MPS server
 parser.add_argument('--cpuset_cpus', type=str, default=None) # value of cpuset_cpus to forward to container
+parser.add_argument('--max_failed_heartbeats_count', type=int, default=5) # how many heartbeats failures in a row must happen before give up
+parser.add_argument('--max_failed_pending_launch_gets_count', type=int, default=10) # how many failed attempts to get a pending launch in a row must happen before give up
+parser.add_argument('--max_failed_result_uploads_count', type=int, default=10) # how many failed attempts to upload result of a launch in a row must happen before give up
 
 args = parser.parse_args()
 env_vars = {}
@@ -91,21 +94,24 @@ env_vars['AWS_ACCESS_KEY_ID'] = s3_credentials.access_key
 env_vars['AWS_SECRET_ACCESS_KEY'] = s3_credentials.secret_key
 env_vars['AWS_DEFAULT_REGION'] = s3_session.region_name
 
-config = botocore.config.Config(
-    connect_timeout=20,  # Wait up to 20 seconds to establish a connection
-    read_timeout=20,     # Wait up to 20 seconds to receive data chunks
-    retries={
-        'max_attempts': 10,
-        'mode': 'adaptive'
-    }
-)
+# config = botocore.config.Config(
+#     connect_timeout=20,  # Wait up to 20 seconds to establish a connection
+#     read_timeout=20,     # Wait up to 20 seconds to receive data chunks
+#     retries={
+#         'max_attempts': 10,
+#         'mode': 'adaptive'
+#     }
+# )
 
-s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url, config=config)
+# s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url, config=config)
+
+s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url)
 
 class State(IntEnum):
     IDLE = auto()
     IMAGE_PULL = auto()
-    RUNNING = auto()
+    RUN = auto()
+    RESULT_UPLOAD = auto()
 
 state = State.IDLE
 launch_id = None
@@ -114,6 +120,10 @@ pull_result = None
 pull_finished_event = None
 pull_thread = None
 container = None
+failed_heartbeats_count = 0
+failed_pending_launch_gets_count = 0
+failed_result_uploads_count = 0
+run_result = None
 
 @dataclass(slots=True)
 class ResultMetadata:
@@ -147,38 +157,31 @@ def pull_image(image_name, pull_result, finish_event):
     finally:
         finish_event.set()
 
-def put_heartbeat(key, retries_count=2):
-    delay = 0.5
-
-    for _ in range(retries_count):
-        try:
-            s3.put_object(
-                Key=key,
-                Bucket=args.s3_bucket_name,
-                Body=b'',
-            )
-            return
-        except botocore.exceptions.ClientError as e:
-            if e.response.get('Error', {}).get('Code', {}) == 'OperationAborted':
-                Logging.get().warn(f'Failed to put_object "{key}": OperationAborted. Retrying in {delay} seconds')
-                time.sleep(delay)
-                delay *= 2
-            else:
-                raise e  
-
-    raise Exception(f'Failed to put_object "{key}": {retries_count} exhausted')
-
 LOG(f'Runner ready')
         
 while True:
     sleep_interval = args.heartbeat_interval
-    heartbeat_key = f'{args.key_prefix}/heartbeats/{runner_name}/{int(time.time())}{lu.when(launch_id, lambda: '_' + launch_id, '')}'
-    put_heartbeat(heartbeat_key)
-    LOG.debug(
-        f'Heartbeat sent "{heartbeat_key}", ' +
-        f'state={state.name}' +
-        lu.when(container is not None, lambda: f', container "{container.name}" ({container.short_id})', ''),
-    )
+    
+    try:
+        heartbeat_key = f'{args.key_prefix}/heartbeats/{runner_name}/{int(time.time())}{lu.when(launch_id, lambda: '_' + launch_id, '')}'
+        s3.put_object(
+            Key=heartbeat_key,
+            Bucket=args.s3_bucket_name,
+            Body=b'',
+        )
+        LOG.debug(
+            f'Heartbeat sent "{heartbeat_key}", ' +
+            f'state={state.name}' +
+            lu.when(container is not None, lambda: f', container "{container.name}" ({container.short_id})', ''),
+        )
+        failed_heartbeats_count = 0
+    except botocore.exceptions.ClientError as e:
+        LOG.error(f'Failed to send heartbeat: {str(e)}')
+        failed_heartbeats_count += 1
+
+    if failed_heartbeats_count >= args.max_failed_heartbeats_count:
+        raise Exception(f'Threshold of failed heartbeats ' + 
+                        f'({failed_heartbeats_count} vs {args.max_failed_heartbeats_count}) reached, giving up')
 
     if state == State.IDLE:
         assert launch_id is None
@@ -187,33 +190,48 @@ while True:
         assert pull_finished_event is None
         assert pull_thread is None
         assert container is None
-        
-        response = s3.list_objects_v2(Bucket=args.s3_bucket_name, Prefix=f'{args.key_prefix}/pending_launches/{runner_name}')
-        
-        for obj in response.get('Contents', []):
-            key = obj['Key']
-            launch_id = os.path.basename(key)
-            LOG(f'Processing new launch "{launch_id}"')
-            
-            obj = s3.get_object(Bucket=args.s3_bucket_name, Key=key)
-            
-            with io.BytesIO(obj['Body'].read()) as b:
-                launch = json.load(b)
-    
-            s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
+        s3_context = None
 
-            pull_result = ResultMetadata(is_ok=False)
-            pull_finished_event = threading.Event()
-            pull_thread = threading.Thread(
-                target=pull_image, 
-                args=(launch['launch_image'], pull_result, pull_finished_event),
-                daemon=True # Daemon ensures the thread dies if the main script kills itself
-            )
-            pull_thread.start()
-            state = State.IMAGE_PULL
-            sleep_interval = 0
-            LOG(f'Started pull of launch image "{launch['launch_image']}"')
-            break
+        try:
+            s3_context = 'list_objects_v2'
+            response = s3.list_objects_v2(Bucket=args.s3_bucket_name, Prefix=f'{args.key_prefix}/pending_launches/{runner_name}')
+
+            for obj in response.get('Contents', []):
+                key = obj['Key']
+                launch_id = os.path.basename(key)
+                LOG(f'Processing new launch "{launch_id}"')
+
+                s3_context = 'get_object'
+                obj = s3.get_object(Bucket=args.s3_bucket_name, Key=key)
+                
+                with io.BytesIO(obj['Body'].read()) as b:
+                    launch = json.load(b)
+
+                s3_context = 'delete_object'
+                s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
+    
+                pull_result = ResultMetadata(is_ok=False)
+                pull_finished_event = threading.Event()
+                pull_thread = threading.Thread(
+                    target=pull_image, 
+                    args=(launch['launch_image'], pull_result, pull_finished_event),
+                    daemon=True # Daemon ensures the thread dies if the main script kills itself
+                )
+                pull_thread.start()
+                state = State.IMAGE_PULL
+                sleep_interval = 0
+                LOG(f'Started pull of launch image "{launch['launch_image']}"')
+                break
+                
+            failed_pending_launch_gets_count = 0
+        except botocore.exceptions.ClientError as e:
+            assert s3_context is not None
+            LOG.error(f'Failed to get pending launches when doing {s3_context}: {str(e)}')
+            failed_pending_launch_gets_count += 1
+
+        if failed_pending_launch_gets_count >= args.max_failed_pending_launch_gets_count:
+            raise Exception(f'Threshold of failed gets of pending launch ' + 
+                            f'({failed_pending_launch_gets_count} vs {args.max_failed_pending_launch_gets_count}) reached, giving up')
 
     elif state == State.IMAGE_PULL:
         assert launch_id is not None
@@ -232,7 +250,7 @@ while True:
                         error_code=1,
                         runner_name=runner_name,
                     )
-                    s3.put_object(
+                    run_result = dict(
                         Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
                         Bucket=args.s3_bucket_name, 
                         Body=b'',
@@ -242,7 +260,7 @@ while True:
                     launch_id = None
                     launch = None
                     container = None
-                    state = State.IDLE
+                    state = State.RESULT_UPLOAD
                     sleep_interval = 0
                 else:
                     try:
@@ -275,7 +293,7 @@ while True:
                         LOG.debug(f'Starting container with params: {kwargs}')
                         container = docker_client.containers.run(**kwargs)
                         LOG(f'Container "{container.name}" ({container.short_id}) started for "{launch_id}"')
-                        state = State.RUNNING
+                        state = State.RUN
                         sleep_interval = 0
                     except DockerException as e:
                         error_message = f'Failed to start container for "{launch_id}": {str(e)}'
@@ -286,7 +304,7 @@ while True:
                             error_code=1, 
                             runner_name=runner_name,
                         )
-                        s3.put_object(
+                        run_result = dict(
                             Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
                             Bucket=args.s3_bucket_name, 
                             Body=b'',
@@ -296,14 +314,14 @@ while True:
                         launch_id = None
                         launch = None
                         container = None
-                        state = State.IDLE
+                        state = State.RESULT_UPLOAD
                         sleep_interval = 0
             finally:
                 pull_result = None
                 pull_finished_event = None
                 pull_thread = None
             
-    elif state == State.RUNNING:
+    elif state == State.RUN:
         assert launch_id is not None
         assert launch is not None
         assert pull_result is None
@@ -363,7 +381,7 @@ while True:
                             )
                             LOG.error(metadata.error_message)
 
-            s3.put_object(
+            run_result = dict(
                 Key=f'{args.key_prefix}/complete_launches/{runner_name}/{launch_id}',
                 Bucket=args.s3_bucket_name, 
                 Body=response,
@@ -380,7 +398,24 @@ while True:
             launch = None
             container = None
             sleep_interval = 0
+            state = State.RESULT_UPLOAD
+
+    elif state == State.RESULT_UPLOAD:
+        assert run_result is not None
+        
+        try:
+            s3.put_object(**run_result)
+            run_result = None
             state = State.IDLE
+            failed_result_uploads_count = 0
+        except botocore.exceptions.ClientError as e:
+            LOG.error(f'Failed to upload run result: {str(e)}')
+            failed_result_uploads_count += 1
+
+        if failed_result_uploads_count >= args.max_failed_result_uploads_count:
+            raise Exception(f'Threshold of failed result uploads ' + 
+                            f'({failed_result_uploads_count} vs {args.max_failed_result_uploads_count}) reached, giving up')
+        
     
     time.sleep(sleep_interval)
     
