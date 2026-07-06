@@ -12,6 +12,7 @@ import logging
 import threading
 
 import boto3
+import botocore
 import docker
 from docker.errors import APIError, DockerException, NotFound
 from docker.types import DeviceRequest
@@ -136,16 +137,33 @@ def pull_image(image_name, pull_result, finish_event):
     finally:
         finish_event.set()
 
+def put_heartbeat(key, retries_count=2):
+    delay = 0.5
+
+    for _ in range(retries_count):
+        try:
+            s3.put_object(
+                Key=key,
+                Bucket=args.s3_bucket_name,
+                Body=b'',
+            )
+            return
+        except botocore.exceptions.ClientError as e:
+            if e.response.get('Error', {}).get('Code', {}) == 'OperationAborted':
+                Logging.get().warn(f'Failed to put_object "{key}": OperationAborted. Retrying in {delay} seconds')
+                time.sleep(delay)
+                delay *= 2
+            else:
+                raise e  
+
+    raise Exception(f'Failed to put_object "{key}": {retries_count} exhausted')
+
 LOG(f'Runner ready')
         
 while True:
     sleep_interval = args.heartbeat_interval
     heartbeat_key = f'{args.key_prefix}/heartbeats/{runner_name}/{int(time.time())}{lu.when(launch_id, lambda: '_' + launch_id, '')}'
-    s3.put_object(
-        Key=heartbeat_key,
-        Bucket=args.s3_bucket_name,
-        Body=b'',
-    )
+    put_heartbeat(heartbeat_key)
     LOG.debug(
         f'Heartbeat sent "{heartbeat_key}", ' +
         f'state={state.name}' +
