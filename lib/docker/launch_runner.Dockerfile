@@ -1,8 +1,8 @@
 FROM ubuntu:24.04
 
-RUN apt update
-RUN apt install -y python3-pip
-RUN apt install -y tzdata
+RUN apt-get update
+RUN apt-get install -y python3-pip
+RUN apt-get install -y tzdata
 ENV TZ=Europe/Moscow
 
 RUN pip install --break-system-packages boto3 
