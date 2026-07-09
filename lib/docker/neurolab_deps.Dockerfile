@@ -1,5 +1,6 @@
 FROM torch-gpu:2.12.0
-RUN apt update && apt install -y vim emacs-nox git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y vim git tzdata && rm -rf /var/lib/apt/lists/*
+ENV TZ=Europe/Moscow
 RUN pip install --break-system-packages --no-cache-dir jupyterlab ipywidgets  
 RUN pip install --break-system-packages --no-cache-dir pandas cupy-cuda13x einops matplotlib 
 RUN pip install --break-system-packages --no-cache-dir tqdm 
