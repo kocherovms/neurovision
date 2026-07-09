@@ -6,5 +6,6 @@ USER 1000
 RUN git clone https://github.com/kocherovms/neurolab.git /neurolab
 WORKDIR /neurolab
 RUN git submodule update --init --recursive
+RUN git pull --rebase
 RUN touch .docker_launch
 CMD ["/bin/bash"]
