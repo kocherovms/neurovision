@@ -16,6 +16,7 @@ from logging_utils import *
 
 RMQ_DEFAULT_CONNECTION_URL = 'amqp://guest:guest@rabbitmq:5672/%2F'
 RMQ_LAUNCH_REQUESTS_QUEUE_NAME = 'launch_requests'
+RMQ_RUNNERS_INFO_QUEUE_NAME = 'runners_info'
 RMQ_MAGIC_REPLY_QUEUE_NAME = 'amq.rabbitmq.reply-to'
 
 class LaunchRequest:
@@ -61,6 +62,45 @@ class LaunchRequest:
     def run(request, rmq_connection_url=RMQ_DEFAULT_CONNECTION_URL):
         client = LaunchRequest(rmq_connection_url)
         return client(request)
+
+class RunnersInfo:
+    def __init__(self, rmq_connection_url):
+        connection_parameters = pika.URLParameters(rmq_connection_url)
+        self.connection = pika.BlockingConnection(connection_parameters)
+        self.channel = self.connection.channel()
+        self.channel.basic_consume(
+            queue=RMQ_MAGIC_REPLY_QUEUE_NAME, 
+            on_message_callback=self.on_reply, 
+            auto_ack=True
+        )
+        self.result_body = None
+
+    def __call__(self):
+        self.result_body = None
+        properties = pika.spec.BasicProperties(
+            reply_to=RMQ_MAGIC_REPLY_QUEUE_NAME, 
+            delivery_mode=pika.DeliveryMode.Persistent
+        )
+        self.channel.basic_publish(
+            exchange='', 
+            routing_key=RMQ_RUNNERS_INFO_QUEUE_NAME, 
+            body=b'',
+            properties=properties
+        )
+        self.channel.start_consuming()
+        result_body = self.result_body
+        self.result_body = None
+        return json.loads(result_body.decode())
+
+    def on_reply(self, ch, method, properties, body):
+        Logging.get().debug(f'on_reply: {method=}, {properties=}, len(body)={len(body)}')
+        self.result_headers = properties.headers
+        self.result_body = body
+        self.channel.close()
+
+    @staticmethod
+    def get(rmq_connection_url=RMQ_DEFAULT_CONNECTION_URL):
+        return RunnersInfo(rmq_connection_url)()
     
 @dataclass(slots=True)
 class LaunchRunner:
@@ -86,8 +126,13 @@ class LaunchDispatcher:
         self.rmq_connection = pika.BlockingConnection(self.rmq_connection_parameters)
         self.rmq_connection.call_later(delay=1, callback=self.on_idle)
         self.rmq_channel = self.rmq_connection.channel()
-        queue = self.rmq_channel.queue_declare(
+        self.rmq_channel.queue_declare(
             queue=RMQ_LAUNCH_REQUESTS_QUEUE_NAME,
+            durable=True,
+            arguments={'x-single-active-consumer': True},
+        )
+        self.rmq_channel.queue_declare(
+            queue=RMQ_RUNNERS_INFO_QUEUE_NAME,
             durable=True,
             arguments={'x-single-active-consumer': True},
         )
@@ -119,7 +164,12 @@ class LaunchDispatcher:
         self.rmq_channel.basic_qos(prefetch_count=1) # max 1 unacked message, i.e. serial processing
         self.rmq_channel.basic_consume(
             queue=RMQ_LAUNCH_REQUESTS_QUEUE_NAME, 
-            on_message_callback=self.on_request, 
+            on_message_callback=self.on_launch_request, 
+            auto_ack=False,
+        )
+        self.rmq_channel.basic_consume(
+            queue=RMQ_RUNNERS_INFO_QUEUE_NAME, 
+            on_message_callback=self.on_runners_info, 
             auto_ack=False,
         )
         self.rmq_channel.start_consuming()
@@ -289,8 +339,8 @@ class LaunchDispatcher:
         
         self.rmq_connection.call_later(delay=1, callback=self.on_idle)
 
-    def on_request(self, ch, method, properties, body):
-        Logging.get().debug(f'on_message: method={method}, properties={properties}, len(body)={len(body)}')
+    def on_launch_request(self, ch, method, properties, body):
+        Logging.get().debug(f'on_launch_request: method={method}, properties={properties}, len(body)={len(body)}')
         reply_to = properties.reply_to
 
         request = json.loads(body.decode())
@@ -306,6 +356,25 @@ class LaunchDispatcher:
         self.save_launches()
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
+    def on_runners_info(self, ch, method, properties, body):
+        Logging.get().debug(f'on_runners_info: method={method}, properties={properties}, len(body)={len(body)}')
+        reply_to = properties.reply_to
+
+        free_runner_names = set(map(lambda kv: kv[0], filter(lambda kv: kv[1].launch_id is None, self.runners.items())))
+        runners_info = dict(
+            total=len(self.runners),
+            idle=len(free_runner_names),
+            busy=len(self.runners) - len(free_runner_names),
+        )
+        self.rmq_channel.basic_publish(
+            exchange='', 
+            routing_key=reply_to, 
+            body=json.dumps(runners_info).encode(),
+            properties=pika.spec.BasicProperties(delivery_mode=pika.DeliveryMode.Persistent),
+        )
+        
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+
     def save_launches(self):
         if self.launches_fname is None:
             return
@@ -314,7 +383,7 @@ class LaunchDispatcher:
             json.dump(dict(map(lambda kv: (kv[0], dataclasses.asdict(kv[1])), self.launches.items())), f)
             Logging.get().info(f'Saved {len(self.launches)} launches to "{self.launches_fname}"')
 
-    def delete_s3_object_with_retries(self, key, retries_count=2):
+    def delete_s3_object_with_retries(self, key, retries_count=5):
         delay = 0.5
 
         for _ in range(retries_count):
@@ -329,7 +398,7 @@ class LaunchDispatcher:
                 else:
                     raise e  
 
-        raise Exception(f'Failed to delete_object "{key}": {retries_count} exhausted')
+        raise Exception(f'Failed to delete_object "{key}": {retries_count} retries exhausted')
                     
 
 if __name__ == "__main__":
