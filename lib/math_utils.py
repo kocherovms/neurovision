@@ -71,6 +71,16 @@ class RecursiveMovingAverageFilter:
         self.elems.append(x)
         return self.v
 
+    @property
+    def n(self):
+        return len(self.elems)
+
+    def reset(self):
+        v = self.v
+        self.elems.clear()
+        self.v = 0
+        return v
+
     def __str__(self):
         return str(self.v)
 
