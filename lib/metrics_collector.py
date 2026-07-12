@@ -200,7 +200,7 @@ class S3SummaryWriter:
         self.batch_counter = 0
 
     def add_scalar(self, tag, scalar_value, global_step):
-        if isinstance(scalar_value, torch.Tensor) or isinstance(scalar_value, np.ndarray):
+        if isinstance(scalar_value, (np.ndarray, torch.Tensor)):
             scalar_value = scalar_value.item()
             
         batch_item = dict(
@@ -419,7 +419,7 @@ class S3SummaryCollector:
         self.maven_repo = maven_repo
 
     def process_new_data(self):
-        response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name, Prefix=self.key_prefix)
+        response = self.fault_tolerant_s3('list_objects_v2', Bucket=self.s3_bucket_name, Prefix=self.key_prefix)
         is_any_processing = False
         
         # S3 naturally returns keys sorted alphabetically (batch_000000.json, batch_000001.json, etc.)
@@ -451,19 +451,19 @@ class S3SummaryCollector:
             match kind:
                 case 'metrics': 
                     Logging.get().info(f'New metrics batch: {key=}')
-                    obj = self.s3.get_object(Bucket=self.s3_bucket_name, Key=key)
+                    obj = self.fault_tolerant_s3('get_object', Bucket=self.s3_bucket_name, Key=key)
 
                     with io.BytesIO(obj['Body'].read()) as b:
                         batch = pickle.load(b)
                         self.process_metrics_batch(log_dir, batch)
                 case 'assets': 
                     Logging.get().info(f'New asset: {key=}')
-                    obj = self.s3.get_object(Bucket=self.s3_bucket_name, Key=key)
+                    obj = self.fault_tolerant_s3('get_object', Bucket=self.s3_bucket_name, Key=key)
                     self.process_asset(obj['Body'].read(), obj['Metadata'])
                 case _: 
                     raise ValueError(f'Key "{key}" has unsupported {kind=}')
 
-            self.s3.delete_object(Bucket=self.s3_bucket_name, Key=key)
+            self.fault_tolerant_s3('delete_object', Bucket=self.s3_bucket_name, Key=key)
             Logging.get().debug(f'Processed and deleted {key=}')
             is_any_processing = True
 
@@ -564,6 +564,20 @@ class S3SummaryCollector:
         log_dir = os.path.join(self.base_log_dir, log_dir.lstrip('/'))
         Logging.get().info(f'Creating SummaryWriter for log_dir={log_dir} (base_log_dir={self.base_log_dir})')
         return SummaryWriter(log_dir=log_dir)
+
+    def fault_tolerant_s3(self, method_name, *args, **kwargs):
+        retries_count = 5
+        method = getattr(self.s3, method_name)
+
+        for retry_number in range(retries_count):
+            try:
+                return method(*args, **kwargs)
+            except botocore.exceptions.ClientError as e:
+                retry_interval = 2 ** retry_number
+                Logging.get().error(f'Failed to self.s3.{method_name}: {str(e)}. Retrying in {retry_interval} seconds')
+                time.sleep(retry_interval)
+
+        raise Exception(f'Max number {retries_count} of retries for self.s3.{method_name} reached, giving up')
         
 if __name__ == "__main__":
     import argparse
@@ -618,10 +632,7 @@ if __name__ == "__main__":
         )
 
         while True:
-            try:
-                if not collector.process_new_data():
-                    Logging.get().info(f'Did not process any data, going to sleep for {args.poll_interval} seconds')
-            except botocore.exceptions.ClientError as e:
-                Logging.get().error(f'Failed to query new data from S3: {e}')
+            if not collector.process_new_data():
+                Logging.get().info(f'Did not process any data, going to sleep for {args.poll_interval} seconds')
                 
             time.sleep(args.poll_interval)
