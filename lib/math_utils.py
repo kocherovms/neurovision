@@ -1,5 +1,6 @@
 from collections import deque
 import numpy as np
+import torch
 
 import lang_utils as lu
 
@@ -42,6 +43,9 @@ class RecursiveAverageFilter:
         return v
 
     def __call__(self, x, batch_size=1):
+        if isinstance(x, (np.ndarray, torch.Tensor)):
+            x = x.item()
+            
         n_new = self.n + batch_size
         self.v = (self.n * self.v + batch_size * x) / n_new
         self.n = n_new
@@ -60,6 +64,9 @@ class RecursiveMovingAverageFilter:
         self.elems = deque(maxlen=max_n)
 
     def __call__(self, x):
+        if isinstance(x, (np.ndarray, torch.Tensor)):
+            x = x.item()
+        
         if not self.elems:
             self.v = x
         else:
