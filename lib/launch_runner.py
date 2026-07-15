@@ -32,6 +32,7 @@ parser.add_argument('--log_level', type=str, default='info')
 parser.add_argument('-e', action='append', default=[]) # env vars to forward
 parser.add_argument('--user', type=str, default=None) # user in form of user_id:group_id to use to exec container (e.g. 1000:1000)
 parser.add_argument('--mps', action='store_true') # use nvidia MPS server
+parser.add_argument('--gpu', type=int, default=None) # which GPU to use (None means default/first one)
 parser.add_argument('--cpuset_cpus', type=str, default=None) # value of cpuset_cpus to forward to container
 parser.add_argument('--max_failed_heartbeats_count', type=int, default=5) # how many heartbeats failures in a row must happen before give up
 parser.add_argument('--max_failed_pending_launch_gets_count', type=int, default=10) # how many failed attempts to get a pending launch in a row must happen before give up
@@ -93,17 +94,6 @@ s3_credentials = s3_session.get_credentials()
 env_vars['AWS_ACCESS_KEY_ID'] = s3_credentials.access_key
 env_vars['AWS_SECRET_ACCESS_KEY'] = s3_credentials.secret_key
 env_vars['AWS_DEFAULT_REGION'] = s3_session.region_name
-
-# config = botocore.config.Config(
-#     connect_timeout=20,  # Wait up to 20 seconds to establish a connection
-#     read_timeout=20,     # Wait up to 20 seconds to receive data chunks
-#     retries={
-#         'max_attempts': 10,
-#         'mode': 'adaptive'
-#     }
-# )
-
-# s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url, config=config)
 
 s3 = s3_session.client('s3', endpoint_url=args.s3_endpoint_url)
 
@@ -284,8 +274,18 @@ while True:
 
                         if args.mps:
                             kwargs['ipc_mode'] = 'host'
-                            kwargs['volumes'].append('/tmp/nvidia-mps:/tmp/nvidia-mps')
-                            env_vars['CUDA_MPS_PIPE_DIRECTORY'] = '/tmp/nvidia-mps'
+                            mps_dir_name = '/tmp/nvidia-mps'
+                            mps_dir_name += lu.when(args.gpu is not None, f'-gpu{args.gpu}', '')
+                            kwargs['volumes'].append(f'{mps_dir_name}:{mps_dir_name}')
+                            # There may be conflict with default behavior of NVIDIA Container Toolkit 
+                            # which automatically mounts /tmp/nvidia-mps if it sees MPS enabled on host.
+                            # But if there several GPUs on host then default mount may ruin configuration 
+                            # since there may be multiple MPS servers on host with distinct pipe dirs.
+                            # So we better be explicit and use named MPS pipe dir here
+                            env_vars['CUDA_MPS_PIPE_DIRECTORY'] = mps_dir_name
+                        else:
+                            if args.gpu is not None:
+                                env_vars['CUDA_DEVICE'] = f'cuda:{args.gpu}'
 
                         if args.cpuset_cpus is not None:
                             kwargs['cpuset_cpus'] = args.cpuset_cpus
