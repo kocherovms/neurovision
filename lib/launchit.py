@@ -81,7 +81,7 @@ class NotebookProcessor:
                             self.exec_graph.append(ege)
 
         for ege in sorted(self.exec_graph):
-            cell =self.nb['cells'][ege.cell_ind]
+            cell = self.nb['cells'][ege.cell_ind]
             stop_source_line_ind = len(cell['source']) if ege.stop_source_line_ind == -1 else ege.stop_source_line_ind
             
             match ege.command:
@@ -212,10 +212,18 @@ def launchit(fname, launch_serial=0, expandvars={}, make_py_file=False, dir_name
     
     return new_fname
 
-def extract_source_code(fname):
+def extract_source_code(fname, collect_inds=[]):
     processor = NotebookProcessor()
 
     with open(fname, 'rt') as f:
-        processor(f, fname, expandvars={}, collect_inds=[], disable_inds=[])
+        processor(f, fname, expandvars={}, collect_inds=collect_inds, disable_inds=[])
 
-    return '\n'.join(processor.collected_source_lines[None])
+    if collect_inds is None or not collect_inds:
+        return '\n'.join(processor.collected_source_lines[None])
+
+    result = ''
+        
+    for i in collect_inds:
+        result += '\n'.join(processor.collected_source_lines[i])
+
+    return result
