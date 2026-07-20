@@ -344,8 +344,24 @@ while True:
         except NotFound:
             is_container_lost = True
             LOG.error(f'Container is lost')
+
+        is_run_over = container.status in ['exited', 'dead'] or is_container_lost
+        is_run_abort = False
+
+        if not is_run_over:
+            try:
+                response = s3.list_objects_v2(Bucket=args.s3_bucket_name, Prefix=f'{args.key_prefix}/abort_launches/{runner_name}')
     
-        if container.status in ['exited', 'dead'] or is_container_lost:
+                for obj in response.get('Contents', []):
+                    key = obj['Key']
+                    abort_launch_id = os.path.basename(key)
+                    LOG(f'Got abort request for launch "{abort_launch_id}"')
+                    s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
+                    is_run_abort = is_run_abort or abort_launch_id == launch_id
+            except botocore.exceptions.ClientError as e:
+                LOG.warn(f'Failed to get abort requests: {str(e)}')
+    
+        if is_run_over:
             response = b''
             
             if is_container_lost:
@@ -408,6 +424,16 @@ while True:
             container = None
             sleep_interval = 0
             state = State.RESULT_UPLOAD
+        elif is_run_abort:
+            container.remove(force=True)
+            LOG.error(f'Container "{container.name}" ({container.short_id}) removed due to abort of launch "{launch_id}"')
+            launch_id = None
+            launch_start_time = None
+            launch = None
+            container = None
+            run_result = None
+            sleep_interval = 0
+            state = State.IDLE
 
     elif state == State.RESULT_UPLOAD:
         assert run_result is not None
