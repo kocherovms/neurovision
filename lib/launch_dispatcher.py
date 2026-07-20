@@ -105,8 +105,10 @@ class RunnersInfo:
 @dataclass(slots=True)
 class LaunchRunner:
     name: str = None
-    launch_id: object = None # None - runner is idle, otherwise - it executes given launch
     eol_time: object = None # computed end of life time, extended by heartbeat
+    launch_id: str = None # None - runner is idle, otherwise - it executes given launch
+    launch_duration: int = None # how long launch is being run (seconds)
+    abort_launch_id: str = None # id of launch to abort
 
 class LaunchStatus(IntEnum):
     PENDING = auto()
@@ -178,12 +180,16 @@ class LaunchDispatcher:
         # Logging.get().debug(f'on_idle')
         my_time = time.time()
         is_launches_dirty = False
+        resurrections = []
 
         try:
             # Update state of runners - find out which are alive/dead
             response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name, Prefix=f'{self.key_prefix}/heartbeats')
     
             for obj in response.get('Contents', []):
+                running_launch_id = None
+                running_launch_duration = None
+                
                 key = obj['Key']
                 Logging.get().debug(f'Processing heartbeat "{key}"')
                 key_payload = os.path.basename(key)
@@ -191,11 +197,15 @@ class LaunchDispatcher:
     
                 if sep_index == -1:
                     heartbeat_time = lu.from_str(int, key_payload, 0)
-                    running_launch_id = None
                 else:
                     assert sep_index > 0, sep_index
                     heartbeat_time = lu.from_str(int, key_payload[:sep_index], 0)
                     running_launch_id = key_payload[sep_index+1:]
+                    duration_sep_index = running_launch_id.find('|')
+
+                    if duration_sep_index > -1:
+                        running_launch_duration = lu.from_str(int, running_launch_id[duration_sep_index+1:], 0)
+                        running_launch_id = running_launch_id[:duration_sep_index]
                     
                 runner_name = os.path.basename(os.path.dirname(key))
                 assert len(runner_name) > 0
@@ -209,18 +219,57 @@ class LaunchDispatcher:
                             name=runner_name,
                             eol_time=eol_time,
                             launch_id=running_launch_id,
+                            launch_duration=running_launch_duration,
                         )
-                        Logging.get().info(f'New runner "{runner_name}" with {lu.when(running_launch_id, f'running launch "{running_launch_id}"', 'no running launch')}')
+                        Logging.get().info(f'New runner "{runner_name}" with {lu.when(running_launch_id, f'running launch "{running_launch_id}" ({running_launch_duration}s)', 'no running launch')}')
+
+                        if running_launch_id is not None:
+                            resurrections.append((runner_name, running_launch_id))
                     else:
                         Logging.get().debug(f'Ignoring stale heartbeat for "{runner_name}": {eol_time=}, {my_time=}, delta={my_time - eol_time}')
                 else:
                     # Update runner
-                    self.runners[runner_name].eol_time = heartbeat_time + self.eol_duration
-    
-                    if self.runners[runner_name].launch_id != running_launch_id:
-                        Logging.get().warn(f'Inconsistency: runner "{runner_name}": {self.runners[runner_name].launch_id=} vs {running_launch_id=}!')
+                    runner = self.runners[runner_name]
+                    runner.eol_time = heartbeat_time + self.eol_duration
+                    runner.launch_duration = running_launch_duration
+
+                    if runner.abort_launch_id is not None and running_launch_id is None:
+                        Logging.get().info(f'Runner "{runner_name}" is free after abort of a launch "{runner.abort_launch_id}"')
+                        runner.launch_id = None
+                        runner.launch_duration = None
+                        runner.abort_launch_id = None
 
                 self.delete_s3_object_with_retries(key)
+
+            # Deal with runners which popped out with already running launch. This might happen when due to some problem (pause, network issues)
+            # a heartbeat from this runner was not processed in time
+            for runner_name, launch_id in resurrections:
+                runner = self.runners[runner_name]
+                assert runner.launch_id == launch_id
+                launch = self.launches.get(launch_id)
+                
+                if launch is not None:
+                    if launch.status == LaunchStatus.RUNNING:
+                        concurrent_runners = list(filter(lambda r: r.launch_id == launch_id and r.name != runner_name, self.runners.values()))
+                        
+                        if concurrent_runners:
+                            # We have a situation when launch was redispatched to another runner. 
+                            # In other words right now several runners run the same launch!!!
+                            runner_names = [runner_name]
+                            runner_names.extend(map(lambda r: r.name, concurrent_runners))
+                            Logging.get().warn(f'Launch "{launch_id}" is run by multiple runners: {', '.join(runner_names)}')
+                        else:
+                            # Strange. Launch is running but no other runners exist. Seems runner_name is the only runner
+                            Logging.get().warn(f'Launch "{launch_id}" continues to run on "{runner_name}"')
+                    elif launch.status == LaunchStatus.PENDING:
+                        # Normal situation. Launch is pending but true runner is back
+                        launch.status = LaunchStatus.RUNNING
+                        Logging.get().info(f'Launch "{launch_id}" is assigned back to run on "{runner_name}"')
+                    else:
+                        Logging.get().warn(f'Launch "{launch_id}" has status={launch.status.name}, do not know how to settle inconsistency for "{runner_name}"')
+                else:
+                    # Do not know what to do with this launch (we have no one waiting on another side of RabbitMQ to send results to). Let the run finish on its own
+                    Logging.get().warn(f'Launch "{launch_id}" is orphaned, let it finishes on its own on "{runner_name}"')
     
             # Recyle dead runners
             dead_runner_names = []
@@ -252,7 +301,25 @@ class LaunchDispatcher:
                         launch.status = LaunchStatus.PENDING
                         is_launches_dirty = True
                         Logging.get().info(f'Launch "{launch_id}" brought back to PENDING status from dead runner "{runner_name}"')
-    
+
+            # Get rid of multiple runs of the same launch
+            for launch in filter(lambda l: l.status == LaunchStatus.RUNNING, self.launches.values()):
+                concurrent_runners = list(filter(lambda r: r.launch_id == launch.id and r.abort_launch_id != launch.id, self.runners.values()))
+
+                if len(concurrent_runners) > 1:
+                    # We have multiple runners of the same launch!
+                    concurrent_runners.sort(key=lambda r: -r.launch_duration)
+                    
+                    for abort_runner in concurrent_runners[1:]: # filter out the most long running launch, send abort requests to all remaining
+                        if abort_runner.abort_launch_id != launch.id:
+                            self.s3.put_object(
+                                Key=f'{self.key_prefix}/abort_launches/{abort_runner.name}/{launch.id}',
+                                Bucket=self.s3_bucket_name,
+                                Body=b'',
+                            )
+                            abort_runner.abort_launch_id = launch.id
+                            Logging.get().info(f'Abort of launch "{launch.id}" ({abort_runner.launch_duration}s) requested for runner "{abort_runner.name}"')
+                            
             # Collect launch results
             response = self.s3.list_objects_v2(Bucket=self.s3_bucket_name, Prefix=f'{self.key_prefix}/complete_launches')
     
@@ -271,6 +338,8 @@ class LaunchDispatcher:
                     Logging.get().warn(f'Unknown runner "{runner_name}", do not know which runner to mark free')
                 else:
                     self.runners[runner_name].launch_id = None
+                    self.runners[runner_name].launch_duration = None
+                    self.runners[runner_name].abort_launch_id = None
                     Logging.get().info(f'Runner "{runner_name}" is marked free')
     
                 if not launch_id in self.launches:
@@ -317,6 +386,8 @@ class LaunchDispatcher:
                     free_runner_name = free_runner_names.pop()
                     free_runner = self.runners[free_runner_name]
                     free_runner.launch_id = launch_id
+                    free_runner.launch_duration = None
+                    free_runner.abort_launch_id = None
                     self.s3.put_object(
                         Key=f'{self.key_prefix}/pending_launches/{free_runner_name}/{launch_id}',
                         Bucket=self.s3_bucket_name,
