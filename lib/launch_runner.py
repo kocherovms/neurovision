@@ -105,6 +105,7 @@ class State(IntEnum):
 
 state = State.IDLE
 launch_id = None
+launch_start_time = None
 launch = None
 pull_result = None
 pull_finished_event = None
@@ -151,9 +152,10 @@ LOG(f'Runner ready')
         
 while True:
     sleep_interval = args.heartbeat_interval
+    my_time = time.time()
     
     try:
-        heartbeat_key = f'{args.key_prefix}/heartbeats/{runner_name}/{int(time.time())}{lu.when(launch_id, lambda: '_' + launch_id, '')}'
+        heartbeat_key = f'{args.key_prefix}/heartbeats/{runner_name}/{int(my_time)}{lu.when(launch_id is not None, lambda: '_' + launch_id + '|' + str(int(my_time - launch_start_time)), '')}'
         s3.put_object(
             Key=heartbeat_key,
             Bucket=args.s3_bucket_name,
@@ -175,6 +177,7 @@ while True:
 
     if state == State.IDLE:
         assert launch_id is None
+        assert launch_start_time is None
         assert launch is None
         assert pull_result is None
         assert pull_finished_event is None
@@ -189,6 +192,7 @@ while True:
             for obj in response.get('Contents', []):
                 key = obj['Key']
                 launch_id = os.path.basename(key)
+                launch_start_time = time.time()
                 LOG(f'Processing new launch "{launch_id}"')
 
                 s3_context = 'get_object'
@@ -225,6 +229,7 @@ while True:
 
     elif state == State.IMAGE_PULL:
         assert launch_id is not None
+        assert launch_start_time is not None
         assert launch is not None
         assert pull_result is not None
         assert pull_finished_event is not None
@@ -248,6 +253,7 @@ while True:
                         Metadata=metadata.asdict(),
                     )
                     launch_id = None
+                    launch_start_time = None
                     launch = None
                     container = None
                     state = State.RESULT_UPLOAD
@@ -312,6 +318,7 @@ while True:
                             Metadata=metadata.asdict(),
                         )
                         launch_id = None
+                        launch_start_time = None
                         launch = None
                         container = None
                         state = State.RESULT_UPLOAD
@@ -323,6 +330,7 @@ while True:
             
     elif state == State.RUN:
         assert launch_id is not None
+        assert launch_start_time is not None
         assert launch is not None
         assert pull_result is None
         assert pull_finished_event is None
@@ -395,6 +403,7 @@ while True:
             
             LOG(f'Launch "{launch_id}" completed {lu.when(metadata.is_ok, 'succesfully', 'with FAILURE')}')
             launch_id = None
+            launch_start_time = None
             launch = None
             container = None
             sleep_interval = 0
