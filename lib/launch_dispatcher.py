@@ -403,7 +403,7 @@ class LaunchDispatcher:
     
             if is_launches_dirty:
                 self.save_launches()
-        except botocore.exceptions.HTTPClientError as e:
+        except botocore.exceptions.ClientError as e:
             Logging.get().error(f'Connectivity error: {str(e)}')
         except botocore.exceptions.ConnectionError as e:
             Logging.get().error(f'Connectivity error: {str(e)}')
