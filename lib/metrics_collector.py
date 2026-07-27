@@ -453,13 +453,13 @@ class S3SummaryCollector:
                     Logging.get().info(f'New metrics batch: {key=}')
                     obj = self.fault_tolerant_s3('get_object', Bucket=self.s3_bucket_name, Key=key)
 
-                    with io.BytesIO(obj['Body'].read()) as b:
+                    with io.BytesIO(obj['Body'].read()) as b: # botocore.exceptions.ResponseStreamingError may be thrown here
                         batch = pickle.load(b)
                         self.process_metrics_batch(log_dir, batch)
                 case 'assets': 
                     Logging.get().info(f'New asset: {key=}')
                     obj = self.fault_tolerant_s3('get_object', Bucket=self.s3_bucket_name, Key=key)
-                    self.process_asset(obj['Body'].read(), obj['Metadata'])
+                    self.process_asset(obj['Body'].read(), obj['Metadata']) # botocore.exceptions.ResponseStreamingError may be thrown here
                 case _: 
                     raise ValueError(f'Key "{key}" has unsupported {kind=}')
 
