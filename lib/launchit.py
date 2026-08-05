@@ -6,6 +6,7 @@ import string
 from collections import namedtuple, defaultdict
 from dataclasses import dataclass
 from enum import IntEnum, auto 
+import io
 
 import lang_utils as lu
 from logging_utils import *
@@ -212,11 +213,16 @@ def launchit(fname, launch_serial=0, expandvars={}, make_py_file=False, dir_name
     
     return new_fname
 
-def extract_source_code(fname, collect_inds=[]):
+def extract_source_code(nb, collect_inds=[]):
     processor = NotebookProcessor()
 
-    with open(fname, 'rt') as f:
-        processor(f, fname, expandvars={}, collect_inds=collect_inds, disable_inds=[])
+    if isinstance(nb, str):
+        with open(nb, 'rt') as f:
+            processor(f, nb, expandvars={}, collect_inds=collect_inds, disable_inds=[])
+    elif isinstance(nb, io.IOBase):
+        processor(nb, 'notebook.ipynb', expandvars={}, collect_inds=collect_inds, disable_inds=[])
+    else:
+        assert False, f'Unsupported {type(nb)=}'
 
     if collect_inds is None or not collect_inds:
         return '\n'.join(processor.collected_source_lines[None])

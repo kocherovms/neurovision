@@ -58,6 +58,7 @@ class LearnRateParams:
 
 @dataclass
 class ArtifactSourceParams:
+    group_id: str = None
     model_name: str = None
     model_version: str = None
 
@@ -346,8 +347,9 @@ def hp_parse_artifact_source(source):
     params = ArtifactSourceParams()
 
     grammar = '''
-        spec: MODEL_NAME ":" MODEL_VERSION
+        spec: (GROUP_ID ":")? MODEL_NAME ":" MODEL_VERSION
 
+        GROUP_ID: (LETTER|DIGIT|"_"|"-"|".")+
         MODEL_NAME: EXT_IDENTIFIER
         MODEL_VERSION: EXT_IDENTIFIER
         EXT_IDENTIFIER: (LETTER|DIGIT|"_"|"-")+
@@ -361,6 +363,7 @@ def hp_parse_artifact_source(source):
     tree = parser.parse(source)
     gtv = lambda var_name, default_value='': get_lark_tree_value(tree, var_name, default_value)
     params = ArtifactSourceParams()
+    params.group_id = gtv('GROUP_ID', None)
     params.model_name = gtv('MODEL_NAME')
     params.model_version = gtv('MODEL_VERSION')
     return params

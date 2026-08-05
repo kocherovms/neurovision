@@ -10,12 +10,13 @@ import lang_utils as lu
 from logging_utils import *
 
 class ArtifactRegistry:
-    def __init__(self, maven_group_id, nexus_url='http://nexus:8081', download_nexus_url='http://nexus-slave:8081', nexus_auth=('bot', 'bot'), maven_repo='model-registry'):
+    def __init__(self, maven_group_id, nexus_url='http://nexus:8081', download_nexus_url='http://nexus-slave:8081', nexus_auth=('bot', 'bot'), maven_repo='model-registry', cache=None):
         self.maven_group_id = maven_group_id
         self.nexus_url = nexus_url
         self.download_nexus_url = lu.coalesce(download_nexus_url, self.nexus_url)
         self.nexus_auth = nexus_auth
         self.maven_repo = maven_repo
+        self.cache = cache
 
     def list_components(self):
         query_params = {
@@ -122,9 +123,9 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
             r.raise_for_status()
             Logging.info(f'{self.describe_asset(form_data['maven2.asset1.extension'], asset_classifier)} asset attached to {self.maven_group_id}.{comp_name}:{comp_version}')
 
-    def get_assets(self, comp_name, comp_version):
+    def get_assets(self, comp_name, comp_version, maven_group_id=None):
         query_params = {
-            'group': self.maven_group_id, 
+            'group': lu.coalesce(maven_group_id, self.maven_group_id), 
             'name': comp_name,
             'version': comp_version,
         }
@@ -137,13 +138,23 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
 
         return items[0]['assets']
 
-    def get_asset_content(self, comp_name, comp_version, asset_ext, asset_classifier=''):
+    def get_asset_content(self, comp_name, comp_version, asset_ext, asset_classifier='', maven_group_id=None):
+        maven_group_id = lu.coalesce(maven_group_id, self.maven_group_id)
         assert asset_ext, 'asset_ext arg must be specified'
-        assets = self.get_assets(comp_name, comp_version)
+        cache_key = lambda: (maven_group_id, comp_name, comp_version, asset_ext, asset_classifier)
+
+        if self.cache is not None:
+            content = self.cache.get(cache_key(), None)
+
+            if content is not None:
+                Logging.debug(f'Got {maven_group_id}.{comp_name}.{comp_version}{lu.when(asset_classifier, '-' + asset_classifier, '')}.{asset_ext} from cache')
+                return content
+        
+        assets = self.get_assets(comp_name, comp_version, maven_group_id)
         assets = self.filter_assets(assets, asset_ext, asset_classifier)
 
         if not assets:
-            raise Exception(f'Failed to locate asset {self.describe_asset(asset_ext, asset_classifier)} for {self.maven_group_id}.{comp_name}:{comp_version}')
+            raise Exception(f'Failed to locate asset {self.describe_asset(asset_ext, asset_classifier)} for {maven_group_id}.{comp_name}:{comp_version}')
 
         # By default artifact is available for download via `assets[0]['downloadUrl']`. But we would consturct
         # download URL manually in order to benefit from caching nexus repo (if present, OFC)
@@ -153,6 +164,10 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
         Logging.debug(f'Downloading {download_url} for asset with id={assets[0]['id']}')
         r = requests.get(download_url)
         r.raise_for_status()
+
+        if self.cache is not None:
+            self.cache[cache_key()] = r.content
+        
         return r.content
 
     def is_asset_present(self, comp_name, comp_version, asset_ext, asset_classifier=''):
@@ -180,11 +195,12 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
         return list(filter(filter_func, assets))     
 
 class S3ArtifactRegistry:
-    def __init__(self, maven_group_id, s3_endpoint_url='https://s3.ru-7.storage.selcloud.ru:443', s3_bucket_name='neurolab', key_prefix='launches'):
+    def __init__(self, maven_group_id, s3_endpoint_url='https://s3.ru-7.storage.selcloud.ru:443', s3_bucket_name='neurolab', key_prefix='launches', cache=None):
         self.maven_group_id = maven_group_id
         self.s3_bucket_name = s3_bucket_name
         self.s3 = boto3.client('s3', endpoint_url=s3_endpoint_url)
         self.key_prefix = key_prefix
+        self.cache = cache
 
     def attach_asset(self, comp_name, comp_version, asset, asset_ext='', asset_classifier='', replace=False):
         metadata = dict(
@@ -229,4 +245,18 @@ class S3ArtifactRegistry:
             )
         else:
             assert False, f'Unsupported asset type={type(asset)}'
+
+    def get_asset_content(self, comp_name, comp_version, asset_ext, asset_classifier='', maven_group_id=None):
+        maven_group_id = lu.coalesce(maven_group_id, self.maven_group_id)
+        assert asset_ext, 'asset_ext arg must be specified'
+
+        if self.cache is not None:
+            cache_key = (maven_group_id, comp_name, comp_version, asset_ext, asset_classifier)
+            content = self.cache.get(cache_key, None)
+
+            if content is not None:
+                Logging.debug(f'Got {maven_group_id}.{comp_name}.{comp_version}{lu.when(asset_classifier, '-' + asset_classifier, '')}.{asset_ext} from cache')
+                return content
+
+        raise Exception(f'Failed to locate asset {maven_group_id}.{comp_name}.{comp_version}{lu.when(asset_classifier, '-' + asset_classifier, '')}.{asset_ext} in cache')
         
