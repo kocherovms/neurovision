@@ -59,13 +59,15 @@ def get_grad_norm_groups(model, group_names):
     norms = defaultdict(list)
     
     for name, param in model.named_parameters():
-        if param.grad is not None:
-            grad_sum_squares = torch.sum(param.grad.detach() ** 2).item()
+        if param.grad is None:
+            continue
+            
+        grad_sum_squares = torch.sum(param.grad.detach() ** 2).item()
 
-            for group_name in group_names:
-                if group_name in name:
-                    norms[group_name].append(grad_sum_squares)
-                    break
+        for group_name in group_names:
+            if group_name in name:
+                norms[group_name].append(grad_sum_squares)
+                break
 
     result = {}
     
@@ -73,7 +75,23 @@ def get_grad_norm_groups(model, group_names):
         result[k] = math.sqrt(sum(v)) if v else 0.0
 
     return result
+
+def calc_group_grad_norms(model):
+    norms = {}
     
+    for name, parameters in model.grad_norm_groups.items():
+        grads = [p.grad.detach() for p in parameters if p.grad is not None]
+        
+        if grads:
+            # Compute L2 norm for the specific group
+            norms[name] = torch.linalg.vector_norm(
+                torch.stack([torch.linalg.vector_norm(g) for g in grads])
+            ).item()
+        else:
+            norms[name] = 0.0
+            
+    return norms
+
 def get_old_linear_anneal(start_value, end_value, steps_count):
     def anneal_param(step):
         if steps_count <= 0 or step >= steps_count:
