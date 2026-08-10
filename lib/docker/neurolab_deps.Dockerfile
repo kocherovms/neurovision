@@ -12,4 +12,5 @@ RUN pip install --break-system-packages --no-cache-dir av
 RUN pip install --break-system-packages --no-cache-dir papermill
 RUN pip install --break-system-packages --no-cache-dir scipy
 RUN pip install --break-system-packages --no-cache-dir boto3
+RUN pip install --break-system-packages --no-cache-dir piq # SSIM metric
 CMD ["/bin/bash"]
