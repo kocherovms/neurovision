@@ -34,6 +34,7 @@ parser.add_argument('--user', type=str, default=None) # user in form of user_id:
 parser.add_argument('--mps', action='store_true') # use nvidia MPS server
 parser.add_argument('--gpu', type=int, default=None) # which GPU to use (None means default/first one)
 parser.add_argument('--cpuset_cpus', type=str, default=None) # value of cpuset_cpus to forward to container
+parser.add_argument('--hostname', type=str, default=None) # hostname of container
 parser.add_argument('--max_failed_heartbeats_count', type=int, default=5) # how many heartbeats failures in a row must happen before give up
 parser.add_argument('--max_failed_pending_launch_gets_count', type=int, default=10) # how many failed attempts to get a pending launch in a row must happen before give up
 parser.add_argument('--max_failed_result_uploads_count', type=int, default=10) # how many failed attempts to upload result of a launch in a row must happen before give up
@@ -295,6 +296,9 @@ while True:
 
                         if args.cpuset_cpus is not None:
                             kwargs['cpuset_cpus'] = args.cpuset_cpus
+
+                        if args.hostname is not None:
+                            kwargs['hostname'] = args.hostname
 
                         LOG.debug(f'Starting container with params: {kwargs}')
                         container = docker_client.containers.run(**kwargs)
