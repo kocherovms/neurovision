@@ -61,6 +61,7 @@ class ArtifactSourceParams:
     group_id: str = None
     model_name: str = None
     model_version: str = None
+    asset_classifier: str = None
 
 @dataclass(slots=True)
 class UniversalModuleParams:
@@ -347,11 +348,12 @@ def hp_parse_artifact_source(source):
     params = ArtifactSourceParams()
 
     grammar = '''
-        spec: (GROUP_ID ":")? MODEL_NAME ":" MODEL_VERSION
+        spec: (GROUP_ID ":")? MODEL_NAME ":" MODEL_VERSION (":" "cls" "=" ASSET_CLASSIFIER)?
 
         GROUP_ID: (LETTER|DIGIT|"_"|"-"|".")+
         MODEL_NAME: EXT_IDENTIFIER
         MODEL_VERSION: EXT_IDENTIFIER
+        ASSET_CLASSIFIER: (LETTER|DIGIT|"_"|"-"|",")+
         EXT_IDENTIFIER: (LETTER|DIGIT|"_"|"-")+
 
         %import common.LETTER
@@ -366,6 +368,7 @@ def hp_parse_artifact_source(source):
     params.group_id = gtv('GROUP_ID', None)
     params.model_name = gtv('MODEL_NAME')
     params.model_version = gtv('MODEL_VERSION')
+    params.asset_classifier = gtv('ASSET_CLASSIFIER', None)
     return params
 
 def hp_parse_arg_list(arg_list):
