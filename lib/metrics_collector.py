@@ -401,6 +401,7 @@ class RmqSummaryCollector(RmqSummaryBase):
         Logging.get().info(f'Creating SummaryWriter for log_dir={log_dir} (base_log_dir={self.base_log_dir})')
         return SummaryWriter(log_dir=log_dir)
 
+
 class S3SummaryCollector:
     def __init__(self,
                  base_log_dir, 
@@ -452,14 +453,16 @@ class S3SummaryCollector:
                 case 'metrics': 
                     Logging.get().info(f'New metrics batch: {key=}')
                     obj = self.fault_tolerant_s3('get_object', Bucket=self.s3_bucket_name, Key=key)
+                    obj_body = self.fault_tolerant_foo(lambda: obj['Body'].read(), "metrics/obj['Body'].read()") # botocore.exceptions.ResponseStreamingError may be thrown here
 
-                    with io.BytesIO(obj['Body'].read()) as b: # botocore.exceptions.ResponseStreamingError may be thrown here
+                    with io.BytesIO(obj_body) as b: 
                         batch = pickle.load(b)
                         self.process_metrics_batch(log_dir, batch)
                 case 'assets': 
                     Logging.get().info(f'New asset: {key=}')
                     obj = self.fault_tolerant_s3('get_object', Bucket=self.s3_bucket_name, Key=key)
-                    self.process_asset(obj['Body'].read(), obj['Metadata']) # botocore.exceptions.ResponseStreamingError may be thrown here
+                    obj_body = self.fault_tolerant_foo(lambda: obj['Body'].read(), "assets/obj['Body'].read()") # botocore.exceptions.ResponseStreamingError may be thrown here
+                    self.process_asset(obj_body, obj['Metadata']) 
                 case _: 
                     raise ValueError(f'Key "{key}" has unsupported {kind=}')
 
@@ -578,6 +581,19 @@ class S3SummaryCollector:
                 time.sleep(retry_interval)
 
         raise Exception(f'Max number {retries_count} of retries for self.s3.{method_name} reached, giving up')
+
+    def fault_tolerant_foo(self, foo, foo_desc):
+        retries_count = 5
+
+        for retry_number in range(retries_count):
+            try:
+                return foo()
+            except botocore.exceptions.BotoCoreError as e:
+                retry_interval = 2 ** retry_number
+                Logging.get().error(f'Failed to {foo_desc}: {str(e)}. Retrying in {retry_interval} seconds')
+                time.sleep(retry_interval)
+
+        raise Exception(f'Max number {retries_count} of retries for {foo_desc} reached, giving up')
         
 if __name__ == "__main__":
     import argparse
