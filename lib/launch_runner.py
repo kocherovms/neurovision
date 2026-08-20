@@ -19,6 +19,9 @@ from docker.errors import APIError, DockerException, NotFound
 from docker.types import DeviceRequest
 import tarfile
 
+import uuid
+from names_generator import generate_name
+
 import lang_utils as lu
 from logging_utils import *
 
@@ -35,6 +38,7 @@ parser.add_argument('--mps', action='store_true') # use nvidia MPS server
 parser.add_argument('--gpu', type=int, default=None) # which GPU to use (None means default/first one)
 parser.add_argument('--cpuset_cpus', type=str, default=None) # value of cpuset_cpus to forward to container
 parser.add_argument('--hostname', type=str, default=None) # hostname of container
+parser.add_argument('--container_name_suffix', type=str, default=None) # suffix to append to name of launched container 
 parser.add_argument('--max_failed_heartbeats_count', type=int, default=5) # how many heartbeats failures in a row must happen before give up
 parser.add_argument('--max_failed_pending_launch_gets_count', type=int, default=10) # how many failed attempts to get a pending launch in a row must happen before give up
 parser.add_argument('--max_failed_result_uploads_count', type=int, default=10) # how many failed attempts to upload result of a launch in a row must happen before give up
@@ -275,6 +279,10 @@ while True:
                             detach=True,
                             remove=False,  # Keep container after exit so we can fetch its files/status
                         )
+
+                        name_suffix = uuid.uuid4().hex[:4]
+                        name_suffix += lu.when(args.container_name_suffix is not None, '_' + args.container_name_suffix, '')
+                        kwargs['name'] = f'{generate_name()}_{name_suffix}'
 
                         if args.user is not None:
                             kwargs['user'] = args.user

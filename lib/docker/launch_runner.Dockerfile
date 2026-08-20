@@ -9,6 +9,7 @@ ENV TZ=Europe/Moscow
 RUN pip install --break-system-packages --no-cache-dir boto3 
 RUN pip install --break-system-packages --no-cache-dir certifi # req-d for boto3 to work (otherwise boto3 will complain about self signed cert)
 RUN pip install --break-system-packages --no-cache-dir docker 
+RUN pip install --break-system-packages --no-cache-dir names_generator 
 
 WORKDIR /app
 COPY launch_runner.py lang_utils.py logging_utils.py  .
