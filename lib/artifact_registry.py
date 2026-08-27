@@ -147,7 +147,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
             content = self.cache.get(cache_key(), None)
 
             if content is not None:
-                Logging.debug(f'Got {maven_group_id}.{comp_name}.{comp_version}{lu.when(asset_classifier, '-' + asset_classifier, '')}.{asset_ext} from cache')
+                Logging.debug(f'Got {maven_group_id}.{comp_name}.{comp_version}{lu.when(asset_classifier, lambda: '-' + asset_classifier, '')}.{asset_ext} from cache')
                 return content
         
         assets = self.get_assets(comp_name, comp_version, maven_group_id)
@@ -255,7 +255,7 @@ class S3ArtifactRegistry:
             content = self.cache.get(cache_key, None)
 
             if content is not None:
-                Logging.debug(f'Got {maven_group_id}.{comp_name}.{comp_version}{lu.when(asset_classifier, '-' + asset_classifier, '')}.{asset_ext} from cache')
+                Logging.debug(f'Got {maven_group_id}.{comp_name}.{comp_version}{lu.when(asset_classifier, lambda: '-' + asset_classifier, '')}.{asset_ext} from cache')
                 return content
 
         raise Exception(f'Failed to locate asset {maven_group_id}.{comp_name}.{comp_version}{lu.when(asset_classifier, '-' + asset_classifier, '')}.{asset_ext} in cache')
