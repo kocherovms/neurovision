@@ -49,8 +49,12 @@ class ModelModeContextManager:
 def eval_guard(model):
     return ModelModeContextManager(model, 'eval')
 
+eval_mode = eval_guard
+
 def train_guard(model):
     return ModelModeContextManager(model, 'train')
+
+train_mode = train_guard
 
 def numpy_dtype_to_torch_dtype(np_dtype):
     return torch.from_numpy(np.array([], dtype=np_dtype)).dtype
