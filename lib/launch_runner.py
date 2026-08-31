@@ -10,6 +10,7 @@ import dataclasses
 from dataclasses import dataclass
 import logging
 import threading
+import random
 
 import boto3
 import botocore
@@ -18,9 +19,6 @@ import docker
 from docker.errors import APIError, DockerException, NotFound
 from docker.types import DeviceRequest
 import tarfile
-
-import uuid
-from names_generator import generate_name
 
 import lang_utils as lu
 from logging_utils import *
@@ -90,6 +88,26 @@ def check_gpu_presence():
             return False
             
         raise e
+
+def generate_word_triplet():
+    # https://share.google/aimode/dA73jdd1YqzODo0CL
+    vowels = "aeiou"
+    consonants = "bcdfghjklmnpqrstvwxyz"
+    pattern = random.choice(["CVC", "VCC", "CCV", "VVC"])
+    triplet = ""
+    
+    # Track previous letter to allow natural double letters (like 'see')
+    for char in pattern:
+        if char == "C":
+            triplet += random.choice(consonants)
+        else:
+            # 30% chance to duplicate the vowel if it's the last slot
+            if len(triplet) > 0 and triplet[-1] in vowels and random.random() < 0.3:
+                triplet += triplet[-1]
+            else:
+                triplet += random.choice(vowels)
+                
+    return triplet
 
 is_gpu_present = check_gpu_presence()
 LOG(f'{is_gpu_present=}')
@@ -280,9 +298,8 @@ while True:
                             remove=False,  # Keep container after exit so we can fetch its files/status
                         )
 
-                        name_suffix = uuid.uuid4().hex[:4]
-                        name_suffix += lu.when(args.container_name_suffix is not None, '_' + args.container_name_suffix, '')
-                        kwargs['name'] = f'{generate_name()}_{name_suffix}'
+                        image_version = launch['launch_image'].split(':')[-1]
+                        kwargs['name'] = f'{generate_word_triplet()}_{image_version}_{lu.coalesce(args.container_name_suffix, 'unk')}'
 
                         if args.user is not None:
                             kwargs['user'] = args.user
