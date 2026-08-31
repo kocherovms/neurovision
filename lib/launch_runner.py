@@ -190,7 +190,7 @@ while True:
             lu.when(container is not None, lambda: f', container "{container.name}" ({container.short_id})', ''),
         )
         failed_heartbeats_count = 0
-    except botocore.exceptions.ClientError as e:
+    except botocore.exceptions.BotoCoreError as e:
         LOG.error(f'Failed to send heartbeat: {str(e)}')
         failed_heartbeats_count += 1
 
@@ -241,7 +241,7 @@ while True:
                 break
                 
             failed_pending_launch_gets_count = 0
-        except botocore.exceptions.ClientError as e:
+        except botocore.exceptions.BotoCoreError as e:
             assert s3_context is not None
             LOG.error(f'Failed to get pending launches when doing {s3_context}: {str(e)}')
             failed_pending_launch_gets_count += 1
@@ -387,7 +387,7 @@ while True:
                     LOG(f'Got abort request for launch "{abort_launch_id}"')
                     s3.delete_object(Bucket=args.s3_bucket_name, Key=key)
                     is_run_abort = is_run_abort or abort_launch_id == launch_id
-            except botocore.exceptions.ClientError as e:
+            except botocore.exceptions.BotoCoreError as e:
                 LOG.warn(f'Failed to get abort requests: {str(e)}')
     
         if is_run_over:
@@ -472,7 +472,7 @@ while True:
             run_result = None
             state = State.IDLE
             failed_result_uploads_count = 0
-        except botocore.exceptions.ClientError as e:
+        except botocore.exceptions.BotoCoreError as e:
             LOG.error(f'Failed to upload run result: {str(e)}')
             failed_result_uploads_count += 1
 
