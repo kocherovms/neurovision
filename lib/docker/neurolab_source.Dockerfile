@@ -15,15 +15,14 @@ RUN git pull --rebase
 USER 0
 
 RUN echo "#!/bin/sh" >> /usr/bin/abort
-RUN echo "echo abort > /neurolab/commands" >> /usr/bin/abort
+RUN echo "echo abort | nc localhost 5555" >> /usr/bin/abort
 RUN chmod +x /usr/bin/abort
 
 RUN echo "#!/bin/sh" >> /usr/bin/stop
-RUN echo "echo stop > /neurolab/commands" >> /usr/bin/stop
+RUN echo "echo stop | nc localhost 5555" >> /usr/bin/stop
 RUN chmod +x /usr/bin/stop
 
 USER 1000
 
-RUN mkfifo commands
 RUN touch .docker_launch
 CMD ["/bin/bash"]
