@@ -1,0 +1,15 @@
+{"op_code":0,"worker_id":"8d14d61a-5d6e-497f-b27d-f1fcc80e52e9-138910960072192","study_name":"18d_study_02.1","directions":[2]}
+{"op_code":2,"worker_id":"8d14d61a-5d6e-497f-b27d-f1fcc80e52e9-138910960072192","study_id":0,"user_attr":{"STUDY_SERIAL":"02.1"}}
+{"op_code":4,"worker_id":"14df6eb1-29bf-4602-9163-8fecf28ebd85-124121683724096","study_id":0,"datetime_start":"2026-09-04T10:51:44.842124"}
+{"op_code":4,"worker_id":"951d8cc8-db12-42de-a425-bde64c460fe8-138727362164544","study_id":0,"datetime_start":"2026-09-04T10:52:15.724115"}
+{"op_code":6,"worker_id":"951d8cc8-db12-42de-a425-bde64c460fe8-138727362164544","trial_id":1,"state":1,"values":[0.9766758919291405],"datetime_complete":"2026-09-04T11:37:14.847099"}
+{"op_code":4,"worker_id":"6160ce0f-7931-4d7c-87ef-f25c26753497-124670235096896","study_id":0,"datetime_start":"2026-09-04T11:37:46.879484"}
+{"op_code":6,"worker_id":"14df6eb1-29bf-4602-9163-8fecf28ebd85-124121683724096","trial_id":0,"state":1,"values":[0.9644585939949836],"datetime_complete":"2026-09-04T11:38:47.017332"}
+{"op_code":4,"worker_id":"71362639-6dd8-46ec-a9fb-ac0c3fc137e1-132565278070592","study_id":0,"datetime_start":"2026-09-04T11:39:14.083978"}
+{"op_code":6,"worker_id":"6160ce0f-7931-4d7c-87ef-f25c26753497-124670235096896","trial_id":2,"state":1,"values":[0.9672049064878486],"datetime_complete":"2026-09-04T12:22:37.031790"}
+{"op_code":4,"worker_id":"c96b1bc2-633f-4d44-9b68-0ddd28932cd3-126731846264640","study_id":0,"datetime_start":"2026-09-04T12:23:05.148056"}
+{"op_code":6,"worker_id":"71362639-6dd8-46ec-a9fb-ac0c3fc137e1-132565278070592","trial_id":3,"state":1,"values":[0.9624897732056424],"datetime_complete":"2026-09-04T12:26:00.271538"}
+{"op_code":4,"worker_id":"d5cb7e29-9bc7-4015-8e0d-f21618049e7e-127160655902528","study_id":0,"datetime_start":"2026-09-04T12:26:30.425237"}
+{"op_code":6,"worker_id":"c96b1bc2-633f-4d44-9b68-0ddd28932cd3-126731846264640","trial_id":4,"state":1,"values":[0.9561264597389846],"datetime_complete":"2026-09-04T13:08:06.927445"}
+{"op_code":4,"worker_id":"eb3d6e86-e21a-45b6-a7e3-19662da12545-132644926363456","study_id":0,"datetime_start":"2026-09-04T13:08:38.846229"}
+{"op_code":6,"worker_id":"d5cb7e29-9bc7-4015-8e0d-f21618049e7e-127160655902528","trial_id":5,"state":1,"values":[0.967910966520958],"datetime_complete":"2026-09-04T13:13:25.549907"}
