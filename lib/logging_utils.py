@@ -26,9 +26,9 @@ class Logging:
     _instance = None
     
     @staticmethod
-    def get(use_raw_stdout=False):
+    def get(use_raw_stdout=False, log_fname=None):
         if Logging._instance is None:
-            return Logging(use_raw_stdout)
+            return Logging(use_raw_stdout, log_fname)
 
         return Logging._instance
 
@@ -52,7 +52,7 @@ class Logging:
     def trace(s, with_duration=True, when=True):
         Logging.get()(s, with_duration, when, log_level=logging.DEBUG - 1)
 
-    def __init__(self, use_raw_stdout=False):
+    def __init__(self, use_raw_stdout=False, log_fname=None):
         syslog_logger = logging.getLogger('kmslog_syslog')
         
         if not syslog_logger.hasHandlers():
@@ -74,10 +74,19 @@ class Logging:
             verbose_stdout_logger.addHandler(stream_handler)
 
         self.sinks = dict(
-            syslog=Logging.Sink(syslog_logger, self.prepare_syslog_message, True),
-            stdout=Logging.Sink(stdout_logger, self.prepare_stdout_message, True),
-            verbose_stdout=Logging.Sink(verbose_stdout_logger, self.prepare_verbose_stdout_message, False),
+            syslog=Logging.Sink(syslog_logger, self.prepare_syslog_message, is_enabled=True),
+            stdout=Logging.Sink(stdout_logger, self.prepare_stdout_message, is_enabled=True),
+            verbose_stdout=Logging.Sink(verbose_stdout_logger, self.prepare_verbose_stdout_message, is_enabled=False),
         )
+        
+        if log_fname is not None:
+            file_logger = logging.getLogger('kmslog_file')
+            
+            if not file_logger.hasHandlers():
+                file_handler = logging.FileHandler(log_fname, mode='a', encoding='utf-8')
+                file_logger.addHandler(file_handler)
+
+            self.sinks['file'] = Logging.Sink(file_logger, self.prepare_file_message, is_enabled=False)
 
         self.set_log_level('all', logging.DEBUG)
 
@@ -153,6 +162,9 @@ class Logging:
             
         msg += s
         return msg
+
+    def prepare_file_message(self, s, t, with_duration):
+        return self.prepare_verbose_stdout_message(s, t, with_duration)
 
     def push_prefix(self, stanza_name, stanza_value):
         if stanza_name in self.prefix_stanzas:
