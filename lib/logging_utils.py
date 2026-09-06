@@ -79,6 +79,8 @@ class Logging:
             verbose_stdout=Logging.Sink(verbose_stdout_logger, self.prepare_verbose_stdout_message, is_enabled=False),
         )
         
+        self.log_fname = log_fname
+        
         if log_fname is not None:
             file_logger = logging.getLogger('kmslog_file')
             
